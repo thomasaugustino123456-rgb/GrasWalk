@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Prayer, PrayerComment, Story } from '../types';
 import { Card, Badge, SectionTitle, Loader } from './Shared';
-import { rewritePrayer } from '../services/geminiService';
 import { supabaseService } from '../services/supabaseService';
 import { supabase } from '../services/supabaseClient';
 
@@ -12,22 +11,16 @@ const PrayerWall: React.FC = () => {
   const [newPrayer, setNewPrayer] = useState('');
   const [isAnon, setIsAnon] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
-  const [isRewriting, setIsRewriting] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [expandedComments, setExpandedComments] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
   const [newPostAlert, setNewPostAlert] = useState<string | null>(null);
   const [activeStoryIndex, setActiveStoryIndex] = useState<number | null>(null);
   const [isUploadingStory, setIsUploadingStory] = useState(false);
-  const [storyToDelete, setStoryToDelete] = useState<Story | null>(null);
   
-  const [isMuted, setIsMuted] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [mediaLoading, setMediaLoading] = useState(true);
+  // Custom confirmation state (iOS Action Sheet style)
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; type: 'prayer' | 'story' } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const storyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -57,6 +50,9 @@ const PrayerWall: React.FC = () => {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'prayers' }, (payload) => {
         setPrayers(prev => prev.map(p => p.id === payload.new.id ? { ...p, prayers_count: payload.new.prayers_count } : p));
       })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'prayers' }, (payload) => {
+        setPrayers(prev => prev.filter(p => p.id !== payload.old.id));
+      })
       .subscribe((status) => setIsLive(status === 'SUBSCRIBED'));
     return () => { supabase.removeChannel(prayerSubscription); };
   }, [loadData]);
@@ -69,20 +65,90 @@ const PrayerWall: React.FC = () => {
       const { data: profile } = await supabase.from('profiles').select('name').single();
       await supabaseService.addPrayer(newPrayer, profile?.name || "Member", isAnon);
       setNewPrayer('');
-    } catch (error) { console.error(error); } finally { setIsPosting(false); }
+    } catch (error) { 
+      console.error(error); 
+    } finally { 
+      setIsPosting(false); 
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingStory(true);
-    try { await supabaseService.uploadStory(file); } catch (error) { console.error(error); } finally { setIsUploadingStory(false); }
+    try { 
+      await supabaseService.uploadStory(file);
+      const updatedStories = await supabaseService.fetchStories();
+      setStories(updatedStories);
+    } catch (error: any) { 
+      console.error(error);
+      alert(`Upload Error: ${error.message}\n\nHint: Check your Supabase Dashboard -> Storage -> Policies. You must have an 'INSERT' policy for authenticated users on the 'stories' bucket.`);
+    } finally { 
+      setIsUploadingStory(false); 
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const processDeletion = async () => {
+    if (!confirmDelete) return;
+    const { id, type } = confirmDelete;
+    
+    try {
+      if (type === 'prayer') {
+        const success = await supabaseService.deletePrayer(id);
+        if (success) {
+          setPrayers(prev => prev.filter(p => p.id !== id));
+        } else {
+          alert("Could not delete. Check your Supabase RLS 'DELETE' policy for the 'prayers' table.");
+        }
+      } else {
+        const success = await supabaseService.deleteStory(id);
+        if (success) {
+          setStories(prev => prev.filter(s => s.id !== id));
+        } else {
+          alert("Could not delete. Check your Supabase RLS 'DELETE' policy for the 'stories' table.");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert("An unexpected error occurred during deletion.");
+    } finally {
+      setConfirmDelete(null);
+    }
   };
 
   if (loading) return <Loader />;
 
   return (
     <div className="space-y-6 pb-20 animate-in fade-in duration-500">
+      {/* iOS Action Sheet / Confirmation Modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center px-4 pb-10 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="w-full max-w-sm space-y-2 animate-in slide-in-from-bottom-10 duration-500">
+            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-2xl rounded-2xl overflow-hidden shadow-2xl">
+              <div className="p-4 text-center border-b border-slate-200/50 dark:border-slate-800/50">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Confirmation</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white mt-1">
+                  Are you sure you want to delete this {confirmDelete.type}?
+                </p>
+              </div>
+              <button 
+                onClick={processDeletion}
+                className="w-full py-4 text-rose-600 font-bold hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors active:bg-rose-100"
+              >
+                Delete {confirmDelete.type === 'prayer' ? 'Prayer' : 'Story'}
+              </button>
+            </div>
+            <button 
+              onClick={() => setConfirmDelete(null)}
+              className="w-full py-4 bg-white dark:bg-slate-900 rounded-2xl font-bold text-slate-900 dark:text-white shadow-xl active:scale-[0.98] transition-transform"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {newPostAlert && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 duration-500">
           <div className="bg-indigo-600/90 backdrop-blur-xl text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-2 border border-white/20">
@@ -110,16 +176,26 @@ const PrayerWall: React.FC = () => {
         </button>
 
         {stories.map((story, idx) => (
-          <button 
-            key={story.id}
-            onClick={() => setActiveStoryIndex(idx)}
-            className="shrink-0 flex flex-col items-center gap-2 group active:scale-95 transition-transform"
-          >
-            <div className="w-16 h-16 rounded-[1.4rem] bg-indigo-100 p-0.5 border-2 border-indigo-600 overflow-hidden shadow-md">
-               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${story.avatar_seed || story.user_id}`} className="w-full h-full object-cover rounded-[1.2rem] bg-white" alt="" />
-            </div>
+          <div key={story.id} className="relative shrink-0 flex flex-col items-center gap-2">
+            <button 
+              onClick={() => setActiveStoryIndex(idx)}
+              className="group active:scale-95 transition-transform"
+            >
+              <div className="w-16 h-16 rounded-[1.4rem] bg-indigo-100 p-0.5 border-2 border-indigo-600 overflow-hidden shadow-md">
+                 <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${story.avatar_seed || story.user_id}`} className="w-full h-full object-cover rounded-[1.2rem] bg-white" alt="" />
+              </div>
+            </button>
             <span className="text-[10px] font-bold text-slate-500 truncate w-16 text-center">{story.author.split(' ')[0]}</span>
-          </button>
+            
+            {story.user_id === currentUserId && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); setConfirmDelete({ id: story.id, type: 'story' }); }}
+                className="absolute -top-1 -right-1 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-lg active:scale-75 transition-transform z-[40]"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            )}
+          </div>
         ))}
       </div>
 
@@ -164,7 +240,17 @@ const PrayerWall: React.FC = () => {
       {/* Feed */}
       <div className="space-y-4 pt-4">
         {prayers.map(prayer => (
-          <Card key={prayer.id} className="active:scale-[0.99] transition-transform">
+          <Card key={prayer.id} className="relative active:scale-[0.99] transition-transform">
+             {prayer.user_id === currentUserId && (
+               <button 
+                 type="button"
+                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({ id: prayer.id, type: 'prayer' }); }}
+                 className="absolute top-6 right-6 p-2 text-slate-300 hover:text-rose-500 transition-colors z-[40]"
+                 title="Delete prayer"
+               >
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+               </button>
+             )}
              <div className="flex justify-between items-start mb-3">
                <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-[0.8rem] bg-indigo-600 flex items-center justify-center text-white font-bold text-xs shadow-md">
@@ -176,7 +262,7 @@ const PrayerWall: React.FC = () => {
                   </div>
                </div>
              </div>
-             <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed mb-4">{prayer.content}</p>
+             <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed mb-4 pr-12">{prayer.content}</p>
              <div className="flex items-center gap-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
                 <button 
                   onClick={() => supabaseService.toggleSupport(prayer.id)}
@@ -220,7 +306,7 @@ const PrayerWall: React.FC = () => {
               </div>
               <div className="flex-1 bg-black flex items-center justify-center">
                  {stories[activeStoryIndex].media_type === 'video' ? (
-                   <video src={stories[activeStoryIndex].media_url} autoPlay playsInline muted={isMuted} className="max-h-full w-full object-contain" />
+                   <video src={stories[activeStoryIndex].media_url} autoPlay playsInline muted className="max-h-full w-full object-contain" />
                  ) : (
                    <img src={stories[activeStoryIndex].media_url} className="max-h-full w-full object-contain" />
                  )}

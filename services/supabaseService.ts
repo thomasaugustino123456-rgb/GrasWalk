@@ -46,6 +46,22 @@ export const supabaseService = {
     } as UserProfile;
   },
 
+  async updateProfile(updates: { name?: string; avatar_seed?: string }): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', user.id);
+
+    if (error) {
+      console.error("Update profile error:", error);
+      return false;
+    }
+    return true;
+  },
+
   // PRAYER OPERATIONS
   async fetchPrayers(): Promise<Prayer[]> {
     const { data: { user } } = await supabase.auth.getUser();
@@ -111,7 +127,11 @@ export const supabaseService = {
 
   async deletePrayer(id: string): Promise<boolean> {
     const { error } = await supabase.from('prayers').delete().eq('id', id);
-    return !error;
+    if (error) {
+      console.error("Supabase Delete Prayer Error:", error);
+      return false;
+    }
+    return true;
   },
 
   async toggleSupport(prayerId: string): Promise<boolean> {
@@ -166,7 +186,6 @@ export const supabaseService = {
     const fileName = `${user.id}-${Date.now()}.${fileExt}`;
     const filePath = `${fileName}`;
 
-    // Explicitly set contentType and cacheControl to ensure smooth processing in Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from('stories')
       .upload(filePath, file, {
@@ -177,26 +196,21 @@ export const supabaseService = {
 
     if (uploadError) {
       console.error("Supabase Storage error details:", uploadError);
-      // More specific error handling for common bucket issues
-      if (uploadError.message.includes('bucket not found')) {
-        throw new Error("The 'stories' storage bucket does not exist. Please create a public bucket named 'stories' in your Supabase dashboard.");
+      if (uploadError.message.includes('violates row-level security policy')) {
+        throw new Error("RLS Error: Your Supabase Storage bucket 'stories' needs a Policy allowing 'INSERT' for authenticated users. Check your dashboard.");
       }
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
+      throw new Error(`Upload failed: ${uploadError.message}`);
     }
 
     const { data: { publicUrl } } = supabase.storage
       .from('stories')
       .getPublicUrl(filePath);
 
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile } = await supabase
       .from('profiles')
       .select('name, avatar_seed')
       .eq('id', user.id)
       .single();
-
-    if (profileError) {
-      console.warn("Could not fetch profile for story metadata, using defaults.");
-    }
 
     const { data: story, error: dbError } = await supabase
       .from('stories')
@@ -211,8 +225,8 @@ export const supabaseService = {
       .single();
 
     if (dbError) {
-      console.error("Database insert error for story:", dbError);
-      throw new Error("Story media uploaded, but failed to save record to the database.");
+      console.error("Database story insert error:", dbError);
+      throw new Error("Failed to save story record. Check 'stories' table RLS policies.");
     }
 
     return story;
@@ -220,7 +234,11 @@ export const supabaseService = {
 
   async deleteStory(id: string): Promise<boolean> {
     const { error } = await supabase.from('stories').delete().eq('id', id);
-    return !error;
+    if (error) {
+      console.error("Supabase Delete Story Error:", error);
+      return false;
+    }
+    return true;
   },
 
   // COMMENT OPERATIONS
@@ -328,7 +346,6 @@ export const supabaseService = {
   async updateStats(type: 'devo' | 'prayer'): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    // Simple mock logic for streaks/stats
     console.log(`Activity logged: ${type}`);
   }
 };
