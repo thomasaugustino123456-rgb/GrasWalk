@@ -36,10 +36,16 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
     },
   });
 
-  const responseText = response.text ?? "{}";
+  const responseText: string = response.text || "{}";
   const data = JSON.parse(responseText);
+  
   return {
-    ...data,
+    title: data.title || "Daily Devotional",
+    verse: data.verse || "",
+    reference: data.reference || translation,
+    reflection: data.reflection || "",
+    reflectionQuestion: data.reflectionQuestion || "",
+    shortPrayer: data.shortPrayer || "",
     date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   };
 };
@@ -56,7 +62,7 @@ export const askTheBible = async (question: string, history: { role: string; tex
   const chat = ai.chats.create({
     model: "gemini-3-pro-preview",
     history: history.map(h => ({
-      role: h.role === 'user' ? 'user' : 'model',
+      role: h.role === 'user' ? 'user' : 'model' as 'user' | 'model',
       parts: [{ text: h.text }]
     })),
     config: {
@@ -65,7 +71,7 @@ export const askTheBible = async (question: string, history: { role: string; tex
   });
 
   const response = await chat.sendMessage({ message: question });
-  return response.text ?? "I'm sorry, I couldn't generate a response right now. Please try rephrasing your question.";
+  return response.text || "I'm sorry, I couldn't generate a response right now. Please try rephrasing your question.";
 };
 
 export const rewritePrayer = async (text: string): Promise<string> => {
@@ -74,7 +80,7 @@ export const rewritePrayer = async (text: string): Promise<string> => {
     model: "gemini-3-flash-preview",
     contents: `You are a compassionate prayer helper. Rewrite this prayer request in a gentle, respectful, and encouraging way without changing its meaning: "${text}". Rules: Keep it under 80 words. Warm and supportive tone.`,
   });
-  return response.text ?? text;
+  return response.text || text;
 };
 
 export const getSearchGroundedDevotional = async (topic: string): Promise<Devotional> => {
@@ -97,7 +103,7 @@ export const getSearchGroundedDevotional = async (topic: string): Promise<Devoti
     title: topic,
     verse: "Psalm 118:24",
     reference: translation,
-    reflection: response.text ?? "No reflection generated.",
+    reflection: response.text || "No reflection generated.",
     reflectionQuestion: "How can you be a light today?",
     shortPrayer: "Lord, help us to see your goodness in the world.",
     date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),

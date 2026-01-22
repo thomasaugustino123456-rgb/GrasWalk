@@ -39,7 +39,8 @@ const AskBible: React.FC = () => {
     await supabaseService.saveChatMessage(userMsg);
 
     try {
-      const responseText = await askTheBible(input, messages.map(m => ({ role: m.role, text: m.text })));
+      const chatHistory = messages.map(m => ({ role: m.role as string, text: m.text }));
+      const responseText = await askTheBible(input, chatHistory);
       const botMsg: ChatMessage = { 
         id: (Date.now() + 1).toString(), 
         role: 'model', 
