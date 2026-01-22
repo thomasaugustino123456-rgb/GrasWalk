@@ -2,7 +2,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Devotional } from "../types";
 
 // Always use process.env.API_KEY directly for initialization as per guidelines.
-// The type is now correctly handled via global.d.ts augmentation.
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const getTranslation = () => localStorage.getItem('bible_translation') || 'NIV';
@@ -37,14 +36,15 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
     },
   });
 
-  const data = JSON.parse(response.text);
+  const responseText = response.text ?? "{}";
+  const data = JSON.parse(responseText);
   return {
     ...data,
     date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   };
 };
 
-export const askTheBible = async (question: string, history: { role: string; text: string }[]) => {
+export const askTheBible = async (question: string, history: { role: string; text: string }[]): Promise<string> => {
   const ai = getAI();
   const translation = getTranslation();
   const tone = getTone();
@@ -53,7 +53,6 @@ export const askTheBible = async (question: string, history: { role: string; tex
   if (tone === 'deep') toneInstruction = "knowledgeable Bible scholar and historian";
   if (tone === 'practical') toneInstruction = "bold practical life coach and spiritual mentor";
   
-  // Use history to maintain conversation context
   const chat = ai.chats.create({
     model: "gemini-3-pro-preview",
     history: history.map(h => ({
@@ -66,7 +65,7 @@ export const askTheBible = async (question: string, history: { role: string; tex
   });
 
   const response = await chat.sendMessage({ message: question });
-  return response.text;
+  return response.text ?? "I'm sorry, I couldn't generate a response right now. Please try rephrasing your question.";
 };
 
 export const rewritePrayer = async (text: string): Promise<string> => {
@@ -75,7 +74,7 @@ export const rewritePrayer = async (text: string): Promise<string> => {
     model: "gemini-3-flash-preview",
     contents: `You are a compassionate prayer helper. Rewrite this prayer request in a gentle, respectful, and encouraging way without changing its meaning: "${text}". Rules: Keep it under 80 words. Warm and supportive tone.`,
   });
-  return response.text || text;
+  return response.text ?? text;
 };
 
 export const getSearchGroundedDevotional = async (topic: string): Promise<Devotional> => {
@@ -89,7 +88,6 @@ export const getSearchGroundedDevotional = async (topic: string): Promise<Devoti
     }
   });
 
-  // Extract URLs from groundingMetadata as required by guidelines
   const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks
     ?.map((chunk: any) => chunk.web)
     .filter((web: any) => web && web.uri)
@@ -99,7 +97,7 @@ export const getSearchGroundedDevotional = async (topic: string): Promise<Devoti
     title: topic,
     verse: "Psalm 118:24",
     reference: translation,
-    reflection: response.text,
+    reflection: response.text ?? "No reflection generated.",
     reflectionQuestion: "How can you be a light today?",
     shortPrayer: "Lord, help us to see your goodness in the world.",
     date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
 import { askTheBible } from '../services/geminiService';
@@ -41,7 +40,11 @@ const AskBible: React.FC = () => {
 
     try {
       const responseText = await askTheBible(input, messages.map(m => ({ role: m.role, text: m.text })));
-      const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: responseText };
+      const botMsg: ChatMessage = { 
+        id: (Date.now() + 1).toString(), 
+        role: 'model', 
+        text: responseText 
+      };
       setMessages(prev => [...prev, botMsg]);
       await supabaseService.saveChatMessage(botMsg);
     } catch (error) {
