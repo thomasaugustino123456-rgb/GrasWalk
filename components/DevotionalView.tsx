@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Devotional } from '../types';
-import { generateDailyDevotional, getSearchGroundedDevotional, streamDevotionalAudio } from '../services/geminiService';
+import { generateTopicDevotional, streamDevotionalAudio } from '../services/geminiService';
 import { Loader, Card, Badge, SectionTitle } from './Shared';
 import { supabaseService } from '../services/supabaseService';
 
@@ -13,6 +13,37 @@ const TOPICS = [
   { id: 'joy', label: 'Joy', icon: '✨' },
 ];
 
+// Helper to decode base64 string to Uint8Array as per Gemini API guidelines.
+function decodeBase64(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// Helper to decode raw PCM data to AudioBuffer as per Gemini API guidelines.
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
 const DevotionalView: React.FC = () => {
   const [devotional, setDevotional] = useState<Devotional | null>(null);
   const [loading, setLoading] = useState(true);
@@ -21,8 +52,12 @@ const DevotionalView: React.FC = () => {
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
+  /**
+   * Generates a key for the 12-hour cycle (e.g., 2025-01-22_AM)
+   */
   const getCycleKey = () => {
     const now = new Date();
     const date = now.toISOString().split('T')[0];
@@ -38,6 +73,7 @@ const DevotionalView: React.FC = () => {
     const currentCycle = getCycleKey();
     const cacheKey = `devo_cache_${topicId}`;
 
+    // 12-Hour Freshness Logic: Every topic has its own distinct AM/PM slot
     if (!forceRefresh) {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
@@ -45,56 +81,28 @@ const DevotionalView: React.FC = () => {
         if (parsed.cycle === currentCycle) {
           setDevotional(parsed.data);
           setLoading(false);
-          // If we just loaded the daily bread, pre-fetch other popular topics in background
-          if (topicId === 'daily') prefetchPopularTopics();
           return;
         }
       }
     }
 
     try {
-      let data;
-      if (topicId === 'daily') {
-        data = await generateDailyDevotional();
-      } else {
-        const topicLabel = TOPICS.find(t => t.id === topicId)?.label || topicId;
-        data = await getSearchGroundedDevotional(topicLabel);
-      }
+      const topicLabel = TOPICS.find(t => t.id === topicId)?.label || topicId;
+      const data = await generateTopicDevotional(topicLabel);
 
       setDevotional(data);
+      
+      // Store in cycle-aware local storage for this specific topic
       localStorage.setItem(cacheKey, JSON.stringify({
         cycle: currentCycle,
         data
       }));
       
       await supabaseService.updateStats('devo');
-      if (topicId === 'daily') prefetchPopularTopics();
     } catch (error) {
       console.error("Error fetching devotional:", error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const prefetchPopularTopics = async () => {
-    const currentCycle = getCycleKey();
-    const popular = TOPICS.filter(t => t.id !== 'daily').slice(0, 2);
-    
-    for (const topic of popular) {
-      const cacheKey = `devo_cache_${topic.id}`;
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed.cycle === currentCycle) continue;
-      }
-      
-      // Fetch in background without blocking
-      getSearchGroundedDevotional(topic.label).then(data => {
-        localStorage.setItem(cacheKey, JSON.stringify({
-          cycle: currentCycle,
-          data
-        }));
-      }).catch(err => console.debug("Silent prefetch fail:", err));
     }
   };
 
@@ -103,10 +111,20 @@ const DevotionalView: React.FC = () => {
     return () => stopAudio();
   }, []);
 
+  const handleTopicChange = (topicId: string) => {
+    if (topicId === activeTopic) return;
+    setActiveTopic(topicId);
+    fetchDevo(topicId);
+  };
+
   const stopAudio = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch (e) {
+        // Source might have already stopped
+      }
+      audioSourceRef.current = null;
     }
     setIsPlaying(false);
   };
@@ -120,131 +138,136 @@ const DevotionalView: React.FC = () => {
 
     setIsAudioLoading(true);
     try {
+      // Audio is raw PCM data from Gemini TTS
       const audioData = await streamDevotionalAudio(`${devotional.title}. ${devotional.verse}. ${devotional.reflection}. Amen.`);
       if (audioData) {
-        const byteCharacters = atob(audioData);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        if (!audioContextRef.current) {
+          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const pcm16Data = new Int16Array(byteArray.buffer);
         
-        const wavBlob = createWavBlob(pcm16Data, 24000);
-        const url = URL.createObjectURL(wavBlob);
+        const decodedBytes = decodeBase64(audioData);
+        const audioBuffer = await decodeAudioData(decodedBytes, audioContextRef.current, 24000, 1);
         
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        audio.onended = () => setIsPlaying(false);
-        audio.play();
+        const source = audioContextRef.current.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContextRef.current.destination);
+        source.onended = () => setIsPlaying(false);
+        source.start();
+        
+        audioSourceRef.current = source;
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error("TTS error:", error);
+      console.error("Audio playback error:", error);
     } finally {
       setIsAudioLoading(false);
     }
   };
 
-  const createWavBlob = (pcmData: Int16Array, sampleRate: number) => {
-    const buffer = new ArrayBuffer(44 + pcmData.length * 2);
-    const view = new DataView(buffer);
-    const writeString = (offset: number, string: string) => {
-      for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
-    };
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + pcmData.length * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, pcmData.length * 2, true);
-    let offset = 44;
-    for (let i = 0; i < pcmData.length; i++, offset += 2) view.setInt16(offset, pcmData[i], true);
-    return new Blob([buffer], { type: 'audio/wav' });
+  const handleSaveVerse = async () => {
+    if (!devotional || isSaved) return;
+    try {
+      await supabaseService.saveVerse(devotional.verse, devotional.reference);
+      setIsSaved(true);
+    } catch (error) {
+      console.error("Error saving verse:", error);
+    }
   };
 
-  if (loading) return (
-    <div className="space-y-6 animate-pulse px-1">
-      <div className="h-10 w-48 bg-slate-200 dark:bg-slate-800 rounded-xl mb-6"></div>
-      <div className="flex gap-2 overflow-hidden mb-6">
-        {[1,2,3,4,5].map(i => <div key={i} className="h-10 w-24 bg-slate-200 dark:bg-slate-800 rounded-xl shrink-0"></div>)}
-      </div>
-      <div className="h-72 bg-slate-200 dark:bg-slate-800 rounded-[2.5rem] mb-6 shadow-sm"></div>
-      <div className="space-y-3">
-        <div className="h-4 w-full bg-slate-200 dark:bg-slate-800 rounded-full"></div>
-        <div className="h-4 w-full bg-slate-200 dark:bg-slate-800 rounded-full"></div>
-      </div>
-    </div>
-  );
+  if (loading) return <Loader />;
 
   return (
-    <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-6 duration-700">
-      <div className="flex items-end justify-between px-1">
-        <SectionTitle title={devotional?.title || activeTopic} subtitle={devotional?.date} />
-        <button 
-          onClick={handleListen}
-          disabled={isAudioLoading}
-          className={`mb-6 flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition-all active:scale-90 shadow-lg ${
-            isPlaying ? 'bg-rose-500 text-white' : 'bg-white dark:bg-slate-900 text-indigo-600 border border-indigo-50 dark:border-indigo-900/30'
-          }`}
-        >
-          {isAudioLoading ? (
-            <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-          ) : isPlaying ? 'Pause' : 'Listen'}
-        </button>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto no-scrollbar py-2 px-1">
-        {TOPICS.map((topic) => (
+    <div className="space-y-6 pb-20 animate-in fade-in duration-500">
+      <SectionTitle title="Daily Bread" subtitle="Nourishment for your spirit." />
+      
+      <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+        {TOPICS.map(topic => (
           <button
             key={topic.id}
-            onClick={() => { setActiveTopic(topic.id); fetchDevo(topic.id); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap font-bold text-sm transition-all active:scale-95 ${
+            onClick={() => handleTopicChange(topic.id)}
+            className={`shrink-0 px-6 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95 ${
               activeTopic === topic.id 
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' 
-              : 'bg-white/60 dark:bg-slate-900/60 backdrop-blur-md text-slate-500 border border-slate-100 dark:border-slate-800/50 hover:bg-white'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
+              : 'bg-white dark:bg-slate-900 text-slate-500 border border-slate-100 dark:border-slate-800'
             }`}
           >
-            <span>{topic.icon}</span>
+            <span className="mr-2">{topic.icon}</span>
             {topic.label}
           </button>
         ))}
       </div>
 
       {devotional && (
-        <>
-          <Card className="relative overflow-hidden border-none shadow-2xl bg-gradient-to-br from-indigo-600 to-indigo-900 text-white min-h-[300px] flex flex-col justify-end p-8">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-            <div className="relative z-10 space-y-4">
-              <Badge color="yellow">SCRIPTURE</Badge>
-              <p className="text-2xl md:text-3xl font-bold italic">"{devotional.verse}"</p>
-              <p className="font-bold text-indigo-200 text-sm tracking-widest uppercase">— {devotional.reference}</p>
+        <div className="space-y-6">
+          <Card className="p-0 overflow-hidden relative group">
+            <div className="bg-indigo-600 p-8 text-white">
+              <div className="flex justify-between items-start mb-4">
+                <Badge color="yellow">Scripture</Badge>
+                <button 
+                  onClick={handleListen}
+                  disabled={isAudioLoading}
+                  className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md hover:bg-white/30 transition-all active:scale-90"
+                >
+                  {isAudioLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : isPlaying ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  )}
+                </button>
+              </div>
+              <p className="text-2xl font-serif italic leading-relaxed">"{devotional.verse}"</p>
+              <div className="mt-6 flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-widest opacity-80">— {devotional.reference}</p>
+                <button 
+                  onClick={handleSaveVerse}
+                  className={`p-2 rounded-full transition-all ${isSaved ? 'text-rose-400 bg-white/10' : 'text-white/60 hover:text-white'}`}
+                >
+                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill={isSaved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.505 4.046 3 5.5L12 21l7-7Z"/></svg>
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-8 space-y-6 bg-white dark:bg-slate-900">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                   <div className="w-1.5 h-6 bg-indigo-600 rounded-full"></div>
+                   <h3 className="text-xl font-jakarta font-extrabold text-slate-900 dark:text-white">{devotional.title}</h3>
+                </div>
+                <p className="text-slate-600 dark:text-slate-300 font-medium leading-[1.8] text-lg whitespace-pre-line">
+                  {devotional.reflection}
+                </p>
+              </div>
+
+              <div className="p-6 bg-slate-50 dark:bg-black/20 rounded-[2rem] border border-slate-100 dark:border-slate-800">
+                <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] mb-3">Today's Reflection</h4>
+                <p className="text-slate-800 dark:text-slate-100 font-bold italic leading-relaxed text-lg">
+                  "{devotional.reflectionQuestion}"
+                </p>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2 mb-3">
+                   <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">A Moment with God</span>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400 font-medium italic leading-relaxed">
+                  {devotional.shortPrayer}
+                </p>
+              </div>
+            </div>
+            
+            <div className="px-8 py-4 bg-slate-50 dark:bg-black/40 flex items-center justify-between">
+               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{devotional.date}</span>
+               <button 
+                 onClick={() => fetchDevo(activeTopic, true)}
+                 className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+               >
+                 Refresh Bread
+               </button>
             </div>
           </Card>
-
-          <div className="space-y-8 px-1">
-            <div className="text-slate-600 dark:text-slate-300 text-lg leading-relaxed space-y-4 font-medium">
-              {devotional.reflection}
-            </div>
-
-            <Card className="bg-white/80 dark:bg-slate-900/60 border-l-4 border-l-indigo-600 shadow-sm">
-               <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-2">PONDER</h4>
-               <p className="text-slate-900 dark:text-white font-bold text-lg leading-snug">{devotional.reflectionQuestion}</p>
-            </Card>
-
-            <div className="py-12 px-8 rounded-[2.5rem] bg-indigo-50/40 dark:bg-indigo-900/10 text-center border border-indigo-100/30">
-              <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4">PRAYER</h3>
-              <p className="text-indigo-900 dark:text-indigo-200 text-xl font-bold italic leading-relaxed">"{devotional.shortPrayer}"</p>
-            </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

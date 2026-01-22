@@ -7,30 +7,51 @@ const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 const getTranslation = () => localStorage.getItem('bible_translation') || 'NIV';
 const getTone = () => localStorage.getItem('ai_tone') || 'gentle';
 
-export const generateDailyDevotional = async (): Promise<Devotional> => {
+/**
+ * Generates a high-quality devotional based on a topic and current 12-hour cycle.
+ * Uses strict JSON schema to ensure all fields (Scripture, Reflection, Prayer) are present.
+ */
+export const generateTopicDevotional = async (topic: string): Promise<Devotional> => {
   const ai = getAI();
   const translation = getTranslation();
   const tone = getTone();
-  const cycle = new Date().getHours() < 12 ? "Morning" : "Evening";
+  const now = new Date();
+  const cycle = now.getHours() < 12 ? "Morning" : "Evening";
+  
+  // Context to force freshness and variety
+  const dateStr = now.toDateString();
 
   let toneInstruction = "encouraging and gentle language";
   if (tone === 'deep') toneInstruction = "theological, scholarly, and insightful language with historical context";
   if (tone === 'practical') toneInstruction = "practical, bold, and application-focused language";
 
+  const isDaily = topic.toLowerCase() === 'daily bread' || topic.toLowerCase() === 'daily';
+  
+  const focusPrompt = isDaily 
+    ? `Create the official ${cycle} "Daily Bread" for ${dateStr}. Focus on a central theme of faith for the day.`
+    : `Create a specialized ${cycle} devotional about "${topic}" for ${dateStr}. Find a unique perspective or Scripture often overlooked for this theme.`;
+
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `You are a Christian devotional writer. Generate a ${cycle} devotional for a youth-friendly audience. Select a powerful Bible verse from the ${translation} version. Requirements: 120–180 words of text, use a ${toneInstruction}, focusing on ${cycle === 'Morning' ? 'starting the day with God' : 'reflecting on God\'s goodness at the end of the day'}.`,
+    contents: `You are a world-class Christian devotional writer for youth. ${focusPrompt} 
+    
+    Instructions:
+    1. Bible Version: ${translation}.
+    2. Style: ${toneInstruction}.
+    3. Reflection: 120-180 words.
+    4. MUST include a specific 2-sentence prayer at the end that is UNIQUE to this topic and this time of day.
+    5. Avoid repeating common verses like John 3:16 unless critical.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          title: { type: Type.STRING },
-          verse: { type: Type.STRING },
-          reference: { type: Type.STRING },
-          reflection: { type: Type.STRING },
-          reflectionQuestion: { type: Type.STRING },
-          shortPrayer: { type: Type.STRING },
+          title: { type: Type.STRING, description: "Catchy devotional title" },
+          verse: { type: Type.STRING, description: "The full scripture text" },
+          reference: { type: Type.STRING, description: "Book Chapter:Verse" },
+          reflection: { type: Type.STRING, description: "The devotional body text" },
+          reflectionQuestion: { type: Type.STRING, description: "A thought-provoking question" },
+          shortPrayer: { type: Type.STRING, description: "A heartfelt 2-sentence prayer" },
         },
         required: ["title", "verse", "reference", "reflection", "reflectionQuestion", "shortPrayer"]
       },
@@ -55,7 +76,7 @@ export async function* askTheBibleStream(question: string, history: { role: stri
   if (tone === 'deep') toneInstruction = "knowledgeable Bible scholar";
   if (tone === 'practical') toneInstruction = "bold practical spiritual mentor";
   
-  const optimizedHistory = history.slice(-8).map(h => ({
+  const optimizedHistory = history.slice(-6).map(h => ({
     role: h.role === 'user' ? 'user' : 'model' as 'user' | 'model',
     parts: [{ text: h.text }]
   }));
@@ -81,30 +102,11 @@ export async function* askTheBibleStream(question: string, history: { role: stri
 }
 
 export const getSearchGroundedDevotional = async (topic: string): Promise<Devotional> => {
-  const ai = getAI();
-  const translation = getTranslation();
-  const cycle = new Date().getHours() < 12 ? "Morning" : "Evening";
+  return generateTopicDevotional(topic);
+};
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Find encouraging news or principles about "${topic}" and create a ${cycle} devotional. Requirements: Bible verse from ${translation}, 100-word reflection, a deep reflection question, and a 2-sentence prayer. Format the output clearly.`,
-    config: {
-      tools: [{ googleSearch: {} }],
-    }
-  });
-
-  const text = response.text || "";
-  
-  return {
-    title: topic,
-    verse: text.match(/"([^"]+)"/)?.[1] || "Trust in the Lord with all your heart.",
-    reference: text.match(/([A-Z][a-z]+ \d+:\d+)/)?.[0] || translation,
-    reflection: text.length > 500 ? text.substring(0, 500) + "..." : text,
-    reflectionQuestion: "How does this truth change your view of today?",
-    shortPrayer: "Lord, thank You for Your presence in this area of my life. Guide my steps. Amen.",
-    date: `${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} • ${topic}`,
-    sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => c.web).filter(Boolean) || []
-  };
+export const generateDailyDevotional = async (): Promise<Devotional> => {
+  return generateTopicDevotional("Daily Bread");
 };
 
 export const streamDevotionalAudio = async (text: string): Promise<string> => {
