@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, SectionTitle, Badge } from './Shared';
 import { BibleTranslation, AITone } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 const SettingsView: React.FC = () => {
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
@@ -9,6 +10,7 @@ const SettingsView: React.FC = () => {
   const [tone, setTone] = useState<AITone>(() => (localStorage.getItem('ai_tone') as AITone) || 'gentle');
   const [reminderTime, setReminderTime] = useState(localStorage.getItem('reminder_time') || '08:00');
   const [remindersEnabled, setRemindersEnabled] = useState(localStorage.getItem('reminders_enabled') === 'true');
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const toggleTheme = () => {
     const newMode = !darkMode;
@@ -20,6 +22,17 @@ const SettingsView: React.FC = () => {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
     }
+  };
+
+  const copyToClipboard = (text: string, platform: string) => {
+    navigator.clipboard.writeText(text);
+    alert(`Copied ${platform} template! Use this to share naturally.`);
+  };
+
+  const templates = {
+    whatsapp: `Hey! I've been working on a student project called GraceWalk. It's an AI Bible companion I built for our generation. Check it out here: ${window.location.origin}`,
+    discord: `**GraceWalk - Student AI Project** 🕊️\nI built a clean, AI-powered Bible buddy for my daily walk. No ads, just the Word. \nCheck it out: ${window.location.origin}`,
+    reddit_comment: `I actually felt the same way, so I spent my time in school building a free tool called GraceWalk. It uses AI to explain verses simply. Hope it helps you! ${window.location.origin}`
   };
 
   useEffect(() => {
@@ -42,18 +55,44 @@ const SettingsView: React.FC = () => {
         subtitle="Manage your spiritual space."
       />
 
-      {/* PWA / Install Section - Helpful for students without Play Store access */}
+      {/* Share Hub - The "Safety" Section */}
       <div className="space-y-2">
-        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">APP EXPERIENCE</h4>
-        <Card className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-none p-6 shadow-xl relative overflow-hidden">
-          <div className="relative z-10 space-y-3">
-            <Badge color="yellow">Tip</Badge>
-            <h3 className="text-xl font-bold leading-tight">Add to Home Screen</h3>
+        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">SHARE THE LIGHT</h4>
+        <Card className="bg-indigo-600 p-6 shadow-xl relative overflow-hidden group">
+          <div className="relative z-10 space-y-4">
+            <div className="flex justify-between items-start">
+               <Badge color="yellow">Outreach Hub</Badge>
+               <span className="text-[10px] text-white/50 font-bold uppercase tracking-widest">Student Builder v1.2</span>
+            </div>
+            <h3 className="text-xl font-bold text-white leading-tight">Help GraceWalk Grow</h3>
             <p className="text-indigo-100 text-sm font-medium leading-relaxed">
-              Enjoy GraceWalk like a real app! Tap your browser's <span className="font-bold underline">Share</span> button and select <span className="font-bold underline">"Add to Home Screen"</span>.
+              Sharing your work is how the light spreads. Use these templates to invite others to the journey without sounding like an ad.
             </p>
+            <div className="grid grid-cols-1 gap-2 pt-2">
+               <button 
+                 onClick={() => copyToClipboard(templates.whatsapp, 'WhatsApp')}
+                 className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
+               >
+                 <span className="font-bold text-white text-sm">WhatsApp Friend</span>
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/></svg>
+               </button>
+               <button 
+                 onClick={() => copyToClipboard(templates.reddit_comment, 'Reddit')}
+                 className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
+               >
+                 <span className="font-bold text-white text-sm">Helpful Reddit Comment</span>
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+               </button>
+            </div>
+            <div className="pt-2">
+               <div className="p-3 bg-black/20 rounded-xl border border-white/5">
+                  <p className="text-[10px] text-indigo-200 font-bold italic">
+                    "Do not let your hearts be troubled. You believe in God; believe also in me." — John 14:1
+                  </p>
+               </div>
+            </div>
           </div>
-          <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+          <div className="absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 bg-white/10 rounded-full blur-3xl group-hover:bg-white/20 transition-all"></div>
         </Card>
       </div>
 
@@ -138,40 +177,25 @@ const SettingsView: React.FC = () => {
         </Card>
       </div>
 
-      {/* Notifications Group */}
+      {/* App Installation Tip */}
       <div className="space-y-2">
-        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">SYSTEM</h4>
-        <Card className="p-0 overflow-hidden dark:bg-slate-900">
-          <div className="p-4 px-6 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-rose-500 text-white rounded-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">WEB APP SETUP</h4>
+        <Card className="bg-slate-50 dark:bg-slate-900/40 border-dashed border-2 border-slate-200 dark:border-slate-800 p-6">
+           <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-slate-500"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </div>
-              <span className="font-bold text-slate-900 dark:text-white">Daily Notifications</span>
-            </div>
-            <button 
-              onClick={() => setRemindersEnabled(!remindersEnabled)}
-              className={`w-12 h-7 rounded-full relative transition-colors duration-300 active:scale-95 ${remindersEnabled ? 'bg-emerald-500' : 'bg-slate-200'}`}
-            >
-              <div className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ${remindersEnabled ? 'translate-x-5.5' : 'translate-x-0.5'}`}></div>
-            </button>
-          </div>
-          {remindersEnabled && (
-             <div className="p-4 px-6 bg-slate-50 dark:bg-black/20 flex items-center justify-between animate-in slide-in-from-top-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Bread Time</span>
-                <input 
-                  type="time" 
-                  value={reminderTime}
-                  onChange={(e) => setReminderTime(e.target.value)}
-                  className="bg-white dark:bg-slate-800 border-none rounded-lg px-2 py-1 text-indigo-600 font-bold text-sm"
-                />
-             </div>
-          )}
+              <h3 className="font-bold text-slate-900 dark:text-white">Save to Home Screen</h3>
+           </div>
+           <p className="text-slate-500 dark:text-slate-400 text-xs leading-relaxed font-medium">
+             Because this is a student project, you don't need the App Store. Tap your browser's share icon and choose <span className="text-indigo-600 font-bold">"Add to Home Screen"</span> to use it full-screen.
+           </p>
         </Card>
       </div>
 
-      <div className="pt-10 text-center">
+      <div className="pt-10 text-center pb-20">
         <p className="text-[10px] font-bold text-slate-300 dark:text-slate-700 uppercase tracking-[0.4em]">GraceWalk OS v1.2</p>
+        <p className="text-[8px] font-bold text-slate-400 dark:text-slate-600 uppercase tracking-[0.2em] mt-2">Built by a student in faith.</p>
       </div>
     </div>
   );
