@@ -13,7 +13,6 @@ const TOPICS = [
   { id: 'joy', label: 'Joy', icon: '✨' },
 ];
 
-// Helper to decode base64 string to Uint8Array as per Gemini API guidelines.
 function decodeBase64(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -24,7 +23,6 @@ function decodeBase64(base64: string) {
   return bytes;
 }
 
-// Helper to decode raw PCM data to AudioBuffer as per Gemini API guidelines.
 async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
@@ -51,13 +49,11 @@ const DevotionalView: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
-  /**
-   * Generates a key for the 12-hour cycle (e.g., 2025-01-22_AM)
-   */
   const getCycleKey = () => {
     const now = new Date();
     const date = now.toISOString().split('T')[0];
@@ -73,7 +69,6 @@ const DevotionalView: React.FC = () => {
     const currentCycle = getCycleKey();
     const cacheKey = `devo_cache_${topicId}`;
 
-    // 12-Hour Freshness Logic: Every topic has its own distinct AM/PM slot
     if (!forceRefresh) {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
@@ -91,8 +86,6 @@ const DevotionalView: React.FC = () => {
       const data = await generateTopicDevotional(topicLabel);
 
       setDevotional(data);
-      
-      // Store in cycle-aware local storage for this specific topic
       localStorage.setItem(cacheKey, JSON.stringify({
         cycle: currentCycle,
         data
@@ -119,11 +112,7 @@ const DevotionalView: React.FC = () => {
 
   const stopAudio = () => {
     if (audioSourceRef.current) {
-      try {
-        audioSourceRef.current.stop();
-      } catch (e) {
-        // Source might have already stopped
-      }
+      try { audioSourceRef.current.stop(); } catch (e) {}
       audioSourceRef.current = null;
     }
     setIsPlaying(false);
@@ -138,22 +127,18 @@ const DevotionalView: React.FC = () => {
 
     setIsAudioLoading(true);
     try {
-      // Audio is raw PCM data from Gemini TTS
       const audioData = await streamDevotionalAudio(`${devotional.title}. ${devotional.verse}. ${devotional.reflection}. Amen.`);
       if (audioData) {
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         }
-        
         const decodedBytes = decodeBase64(audioData);
         const audioBuffer = await decodeAudioData(decodedBytes, audioContextRef.current, 24000, 1);
-        
         const source = audioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContextRef.current.destination);
         source.onended = () => setIsPlaying(false);
         source.start();
-        
         audioSourceRef.current = source;
         setIsPlaying(true);
       }
@@ -161,6 +146,50 @@ const DevotionalView: React.FC = () => {
       console.error("Audio playback error:", error);
     } finally {
       setIsAudioLoading(false);
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (!devotional) return;
+    try {
+      await navigator.share({
+        title: 'GraceWalk Devotional',
+        text: `"${devotional.verse}" - ${devotional.reference}. Check out today's GraceWalk Devotional: ${devotional.title}`,
+        url: window.location.href,
+      });
+      setShowShareMenu(false);
+    } catch (err) {
+      console.error("Share error:", err);
+    }
+  };
+
+  const handleRedditShare = async () => {
+    if (!devotional) return;
+    const redditMarkdown = `
+# 🍞 Today's GraceWalk Devotional: ${devotional.title}
+
+> "${devotional.verse}" 
+> — **${devotional.reference}**
+
+**Reflection:**
+${devotional.reflection}
+
+**Ponder this:**
+*${devotional.reflectionQuestion}*
+
+**A Moment with God:**
+${devotional.shortPrayer}
+
+---
+*Shared from [GraceWalk](${window.location.origin}) — Your AI-powered Christian companion.*
+    `.trim();
+
+    try {
+      await navigator.clipboard.writeText(redditMarkdown);
+      alert('Reddit-formatted Markdown copied! Go to r/Christianity and paste this into a new post.');
+      setShowShareMenu(false);
+    } catch (err) {
+      console.error("Reddit share error:", err);
     }
   };
 
@@ -200,22 +229,47 @@ const DevotionalView: React.FC = () => {
       {devotional && (
         <div className="space-y-6">
           <Card className="p-0 overflow-hidden relative group">
-            <div className="bg-indigo-600 p-8 text-white">
+            <div className="bg-indigo-600 p-8 text-white relative">
               <div className="flex justify-between items-start mb-4">
                 <Badge color="yellow">Scripture</Badge>
-                <button 
-                  onClick={handleListen}
-                  disabled={isAudioLoading}
-                  className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md hover:bg-white/30 transition-all active:scale-90"
-                >
-                  {isAudioLoading ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  ) : isPlaying ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowShareMenu(!showShareMenu)}
+                      className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-md hover:bg-white/20 transition-all active:scale-90"
+                      title="Share Devotional"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    </button>
+                    
+                    {showShareMenu && (
+                      <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-800 z-50 overflow-hidden animate-in zoom-in-95 duration-200 origin-top-right">
+                        <button onClick={handleNativeShare} className="w-full px-4 py-3 text-left text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                          Share to Apps
+                        </button>
+                        <button onClick={handleRedditShare} className="w-full px-4 py-3 text-left text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 flex items-center gap-2 border-t border-slate-50 dark:border-slate-800">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M17 12h-5v5"/><path d="M7 12h5V7"/></svg>
+                          Copy for Reddit
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={handleListen}
+                    disabled={isAudioLoading}
+                    className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md hover:bg-white/30 transition-all active:scale-90"
+                  >
+                    {isAudioLoading ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    ) : isPlaying ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    )}
+                  </button>
+                </div>
               </div>
               <p className="text-2xl font-serif italic leading-relaxed">"{devotional.verse}"</p>
               <div className="mt-6 flex items-center justify-between">

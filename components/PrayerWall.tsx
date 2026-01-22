@@ -71,6 +71,22 @@ const PrayerWall: React.FC = () => {
     }
   };
 
+  const handleSharePrayer = async (prayer: Prayer) => {
+    const shareData = {
+      title: 'GraceWalk Prayer Wall',
+      text: `${prayer.is_anonymous ? 'Someone' : prayer.author} asked for prayer: "${prayer.content}"`,
+      url: window.location.href,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+        alert('Prayer link copied!');
+      }
+    } catch (err) { console.error(err); }
+  };
+
   const handleToggleAnswered = async (prayerId: string, currentStatus: boolean) => {
     const { error } = await supabase.from('prayers').update({ is_answered: !currentStatus }).eq('id', prayerId);
     if (error) console.error("Toggle Answered Error:", error);
@@ -103,11 +119,7 @@ const PrayerWall: React.FC = () => {
         const success = await supabaseService.deleteStory(id);
         if (success) setStories(prev => prev.filter(s => s.id !== id));
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setConfirmDelete(null);
-    }
+    } catch (err) { console.error(err); } finally { setConfirmDelete(null); }
   };
 
   if (loading) return <Loader />;
@@ -131,12 +143,7 @@ const PrayerWall: React.FC = () => {
                 Delete {confirmDelete.type === 'prayer' ? 'Prayer' : 'Story'}
               </button>
             </div>
-            <button 
-              onClick={() => setConfirmDelete(null)}
-              className="w-full py-4 bg-white dark:bg-slate-900 rounded-2xl font-bold text-slate-900 dark:text-white shadow-xl active:scale-[0.98] transition-transform"
-            >
-              Cancel
-            </button>
+            <button onClick={() => setConfirmDelete(null)} className="w-full py-4 bg-white dark:bg-slate-900 rounded-2xl font-bold text-slate-900 dark:text-white shadow-xl">Cancel</button>
           </div>
         </div>
       )}
@@ -208,14 +215,19 @@ const PrayerWall: React.FC = () => {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{new Date(prayer.timestamp).toLocaleDateString()}</p>
                   </div>
                </div>
-               {prayer.user_id === currentUserId && (
-                  <button 
-                    onClick={() => handleToggleAnswered(prayer.id, prayer.is_answered)}
-                    className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md transition-all ${prayer.is_answered ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}
-                  >
-                    {prayer.is_answered ? 'Mark as Pending' : 'Mark as Answered'}
-                  </button>
-               )}
+               <div className="flex gap-2">
+                 <button onClick={() => handleSharePrayer(prayer)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                 </button>
+                 {prayer.user_id === currentUserId && (
+                    <button 
+                      onClick={() => handleToggleAnswered(prayer.id, prayer.is_answered)}
+                      className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md transition-all ${prayer.is_answered ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}
+                    >
+                      {prayer.is_answered ? 'Pending' : 'Answered'}
+                    </button>
+                 )}
+               </div>
              </div>
              <p className="text-slate-700 dark:text-slate-300 font-medium leading-relaxed mb-4 pr-4">{prayer.content}</p>
              <div className="flex items-center gap-3 pt-4 border-t border-slate-100 dark:border-slate-800/50">
