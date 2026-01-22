@@ -1,0 +1,9 @@
+{
+  "name": "GraceWalk",
+  "description": "A youth-friendly Christian companion for daily devotionals, prayer community, and Bible-based AI guidance.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
