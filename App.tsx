@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import DevotionalView from './components/DevotionalView';
 import PrayerWall from './components/PrayerWall';
@@ -18,6 +19,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
+  const [initialAsk, setInitialAsk] = useState<string | null>(null);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -40,6 +42,11 @@ const App: React.FC = () => {
       supabaseService.getProfile().then(setProfile);
     }
   }, [activeTab, session]);
+
+  const handleAskBuddy = (context: string) => {
+    setInitialAsk(context);
+    setActiveTab('ask');
+  };
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
@@ -66,7 +73,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F2F2F7] dark:bg-black flex flex-col font-inter selection:bg-indigo-100 dark:selection:bg-indigo-900 transition-colors duration-500">
-      {/* Header */}
       <header className="bg-white/70 dark:bg-black/70 backdrop-blur-2xl border-b border-slate-200/40 dark:border-slate-800/40 px-6 py-4 sticky top-0 z-20">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <div className="flex items-center group cursor-pointer active:scale-95 transition-transform" onClick={() => setActiveTab('devotional')}>
@@ -93,20 +99,18 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 px-4 pt-6 max-w-2xl mx-auto w-full">
         <div className="pb-32">
           {activeTab === 'devotional' && <DevotionalView />}
           {activeTab === 'prayer' && <PrayerWall />}
-          {activeTab === 'bible' && <BibleView />}
-          {activeTab === 'ask' && <AskBible />}
+          {activeTab === 'bible' && <BibleView onAskBuddy={handleAskBuddy} />}
+          {activeTab === 'ask' && <AskBible initialPrompt={initialAsk} clearPrompt={() => setInitialAsk(null)} />}
           {activeTab === 'profile' && <ProfileView />}
           {activeTab === 'settings' && <SettingsView />}
         </div>
       </main>
 
-      {/* Navigation - iOS Tab Bar Style */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/70 dark:bg-black/70 backdrop-blur-3xl border-t border-slate-200/50 dark:border-slate-800/50 px-8 pt-3 pb-10 z-30">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-black/80 backdrop-blur-3xl border-t border-slate-200/50 dark:border-slate-800/50 px-8 pt-3 pb-[calc(1.5rem+env(safe-area-inset-bottom))] z-30">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <TabButton active={activeTab === 'devotional'} onClick={() => setActiveTab('devotional')} label="Home" icon={<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>} />
           <TabButton active={activeTab === 'bible'} onClick={() => setActiveTab('bible')} label="Bible" icon={<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M8 6h10"/><path d="M8 10h10"/><path d="M8 14h10"/></svg>} />

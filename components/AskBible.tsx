@@ -1,9 +1,15 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
 import { askTheBible } from '../services/geminiService';
 import { supabaseService } from '../services/supabaseService';
 
-const AskBible: React.FC = () => {
+interface AskBibleProps {
+  initialPrompt?: string | null;
+  clearPrompt?: () => void;
+}
+
+const AskBible: React.FC<AskBibleProps> = ({ initialPrompt, clearPrompt }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -24,23 +30,31 @@ const AskBible: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (initialPrompt) {
+      handleSend(null, initialPrompt);
+      clearPrompt?.();
+    }
+  }, [initialPrompt]);
+
+  useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isTyping) return;
+  const handleSend = async (e: React.FormEvent | null, promptOverride?: string) => {
+    e?.preventDefault();
+    const messageText = promptOverride || input;
+    if (!messageText.trim() || isTyping) return;
 
-    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: input };
+    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: messageText };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!promptOverride) setInput('');
     setIsTyping(true);
     
     await supabaseService.saveChatMessage(userMsg);
 
     try {
       const chatHistory = messages.map(m => ({ role: m.role as string, text: m.text }));
-      const responseText = await askTheBible(input, chatHistory);
+      const responseText = await askTheBible(messageText, chatHistory);
       const botMsg: ChatMessage = { 
         id: (Date.now() + 1).toString(), 
         role: 'model', 
@@ -88,7 +102,7 @@ const AskBible: React.FC = () => {
       </div>
 
       <div className="pt-4 pb-2 sticky bottom-0 bg-slate-50/80 backdrop-blur-md">
-        <form onSubmit={handleSend} className="relative group">
+        <form onSubmit={(e) => handleSend(e)} className="relative group">
           <input
             type="text"
             value={input}

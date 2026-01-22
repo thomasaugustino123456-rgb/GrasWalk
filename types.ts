@@ -1,3 +1,4 @@
+
 export interface Devotional {
   title: string;
   verse: string;
@@ -34,6 +35,7 @@ export interface Prayer {
   timestamp: Date;
   prayers_count: number;
   is_anonymous: boolean;
+  is_answered: boolean; // Added for Praise Reports
   has_supported?: boolean;
   comment_count?: number;
 }

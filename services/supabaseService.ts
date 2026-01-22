@@ -88,6 +88,8 @@ export const supabaseService = {
       timestamp: new Date(p.created_at),
       prayers_count: p.prayers_count || 0,
       is_anonymous: p.is_anonymous,
+      // Fix: added is_answered to satisfy the Prayer interface
+      is_answered: p.is_answered || false,
       has_supported: p.prayer_supports?.some((s: any) => s.user_id === user?.id),
       comment_count: p.prayer_comments?.length || 0
     }));
@@ -121,6 +123,8 @@ export const supabaseService = {
       timestamp: new Date(data.created_at),
       prayers_count: data.prayers_count,
       is_anonymous: data.is_anonymous,
+      // Fix: added is_answered to satisfy the Prayer interface
+      is_answered: data.is_answered || false,
       comment_count: 0
     };
   },
@@ -339,7 +343,9 @@ export const supabaseService = {
       .map((d: any) => ({
         ...d.prayers,
         timestamp: new Date(d.prayers.created_at),
-        has_supported: true
+        has_supported: true,
+        // Ensure is_answered is present in the mapped object
+        is_answered: d.prayers.is_answered || false
       }));
   },
 

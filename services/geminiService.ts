@@ -1,7 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
+
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { Devotional } from "../types";
 
-// Always use process.env.API_KEY directly for initialization as per guidelines.
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const getTranslation = () => localStorage.getItem('bible_translation') || 'NIV';
@@ -48,6 +48,25 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
     shortPrayer: data.shortPrayer || "",
     date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
   };
+};
+
+export const streamDevotionalAudio = async (text: string): Promise<string> => {
+  const ai = getAI();
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text: `Read this Christian devotional in a warm, calm, and peaceful voice: ${text}` }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: 'Kore' },
+        },
+      },
+    },
+  });
+
+  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  return base64Audio || "";
 };
 
 export const askTheBible = async (question: string, history: { role: string; text: string }[]): Promise<string> => {

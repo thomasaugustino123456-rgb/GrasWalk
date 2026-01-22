@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { Devotional } from '../types';
-import { generateDailyDevotional, getSearchGroundedDevotional } from '../services/geminiService';
+import { generateDailyDevotional, getSearchGroundedDevotional, streamDevotionalAudio } from '../services/geminiService';
 import { Loader, Card, Badge, SectionTitle } from './Shared';
 import { supabaseService } from '../services/supabaseService';
 
@@ -17,10 +18,15 @@ const DevotionalView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTopic, setActiveTopic] = useState('daily');
   const [isSaved, setIsSaved] = useState(false);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const fetchDevo = async (topicId: string) => {
     setLoading(true);
     setIsSaved(false);
+    stopAudio();
     try {
       let data;
       if (topicId === 'daily') {
@@ -40,6 +46,7 @@ const DevotionalView: React.FC = () => {
 
   useEffect(() => {
     fetchDevo('daily');
+    return () => stopAudio();
   }, []);
 
   const handleSaveVerse = async () => {
@@ -48,17 +55,110 @@ const DevotionalView: React.FC = () => {
     setIsSaved(true);
   };
 
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setIsPlaying(false);
+  };
+
+  const handleListen = async () => {
+    if (isPlaying) {
+      stopAudio();
+      return;
+    }
+    if (!devotional) return;
+
+    setIsAudioLoading(true);
+    try {
+      const audioData = await streamDevotionalAudio(`${devotional.title}. ${devotional.verse}. ${devotional.reflection}. Amen.`);
+      if (audioData) {
+        const byteCharacters = atob(audioData);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const pcm16Data = new Int16Array(byteArray.buffer);
+        
+        // Convert PCM16 to WAV for simple HTMLAudioElement playback
+        const wavBlob = createWavBlob(pcm16Data, 24000);
+        const url = URL.createObjectURL(wavBlob);
+        
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => setIsPlaying(false);
+        audio.play();
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error("TTS error:", error);
+    } finally {
+      setIsAudioLoading(false);
+    }
+  };
+
+  const createWavBlob = (pcmData: Int16Array, sampleRate: number) => {
+    const buffer = new ArrayBuffer(44 + pcmData.length * 2);
+    const view = new DataView(buffer);
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + pcmData.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, pcmData.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < pcmData.length; i++, offset += 2) {
+      view.setInt16(offset, pcmData[i], true);
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  };
+
   if (loading) return <Loader />;
   if (!devotional) return <div className="p-8 text-center text-slate-500 font-jakarta font-medium">No connection.</div>;
 
   return (
     <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-6 duration-700">
-      <SectionTitle 
-        title={activeTopic === 'daily' ? "Daily Bread" : devotional.title} 
-        subtitle={devotional.date} 
-      />
+      <div className="flex items-end justify-between px-1">
+        <SectionTitle 
+          title={activeTopic === 'daily' ? "Daily Bread" : devotional.title} 
+          subtitle={devotional.date} 
+        />
+        <button 
+          onClick={handleListen}
+          disabled={isAudioLoading}
+          className={`mb-6 flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-sm transition-all active:scale-90 shadow-lg ${
+            isPlaying 
+            ? 'bg-rose-500 text-white animate-pulse' 
+            : 'bg-white dark:bg-slate-900 text-indigo-600 border border-indigo-100 dark:border-indigo-900/30'
+          }`}
+        >
+          {isAudioLoading ? (
+            <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+          ) : isPlaying ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect width="4" height="16" x="6" y="4" rx="1"/><rect width="4" height="16" x="14" y="4" rx="1"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          )}
+          {isPlaying ? 'Pause' : 'Listen'}
+        </button>
+      </div>
 
-      {/* iOS Segmented Control Style Topics */}
       <div className="flex gap-2 overflow-x-auto no-scrollbar py-2 px-1">
         {TOPICS.map((topic) => (
           <button
@@ -79,7 +179,6 @@ const DevotionalView: React.FC = () => {
         ))}
       </div>
 
-      {/* Featured Verse Card - iOS Style */}
       <div className="relative group">
         <Card className="relative overflow-hidden border-none shadow-[0_20px_40px_rgba(79,70,229,0.15)] bg-gradient-to-br from-indigo-600 via-indigo-700 to-indigo-900 text-white min-h-[300px] flex flex-col justify-end p-8">
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl"></div>
@@ -111,28 +210,8 @@ const DevotionalView: React.FC = () => {
           <div className="text-slate-600 dark:text-slate-300 text-lg leading-relaxed space-y-4 font-medium">
             {devotional.reflection}
           </div>
-
-          {devotional.sources && devotional.sources.length > 0 && (
-            <div className="mt-8 pt-6 border-t border-slate-200/50 dark:border-slate-800/50">
-              <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">RESOURCES</h4>
-              <div className="flex flex-wrap gap-2">
-                {devotional.sources.map((source, idx) => (
-                  <a 
-                    key={idx}
-                    href={source.uri}
-                    target="_blank"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-xs font-bold active:scale-95 transition-all"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                    {source.title}
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Reflection Card */}
         <div className="space-y-4">
            <div className="flex items-center gap-3 mb-2 px-2">
             <h3 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">PONDER</h3>
@@ -144,7 +223,6 @@ const DevotionalView: React.FC = () => {
           </Card>
         </div>
 
-        {/* Short Prayer Area */}
         <div className="relative py-12 px-8 rounded-[2.5rem] bg-indigo-50/40 dark:bg-indigo-900/10 text-center">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white dark:bg-slate-900 rounded-full flex items-center justify-center shadow-md">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21c-5-5-5-9-5-12s2-5 5-5 5 2 5 5-5 7-5 12z"/></svg>

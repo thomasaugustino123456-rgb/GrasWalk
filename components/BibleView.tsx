@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { BibleBook } from '../types';
 import { Card, SectionTitle, Loader, Badge } from './Shared';
@@ -74,7 +75,7 @@ const BIBLE_BOOKS: BibleBook[] = [
   { name: "Revelation", chapters: 22, testament: 'NT', category: "Prophecy" },
 ];
 
-const BibleView: React.FC = () => {
+const BibleView: React.FC<{ onAskBuddy?: (context: string) => void }> = ({ onAskBuddy }) => {
   const [selectedBook, setSelectedBook] = useState<BibleBook | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [content, setContent] = useState<{ text: string; reference: string } | null>(null);
@@ -140,10 +141,15 @@ const BibleView: React.FC = () => {
             <h2 className="text-xl font-jakarta font-black text-slate-900 dark:text-white leading-none">{selectedBook.name}</h2>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Chapter {selectedChapter}</span>
           </div>
-          <div className="w-20"></div>
+          <button 
+            onClick={() => onAskBuddy?.(`I am reading ${selectedBook.name} chapter ${selectedChapter}. Can you explain the main themes of this chapter?`)}
+            className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 transition-transform"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </button>
         </div>
 
-        <Card className="p-8 md:p-12 shadow-xl border-none font-serif leading-loose text-slate-800 dark:text-slate-200 text-lg">
+        <Card className="p-8 md:p-12 shadow-xl border-none font-serif leading-[2] text-slate-800 dark:text-slate-200 text-lg">
           <div className="whitespace-pre-wrap select-text">
             {content.text.split('\n').map((line, i) => {
               if (!line.trim()) return null;
@@ -211,7 +217,6 @@ const BibleView: React.FC = () => {
     <div className="space-y-6 pb-32 max-w-2xl mx-auto animate-in fade-in duration-500">
       <SectionTitle title="Holy Bible" subtitle="Explore the 66 books of scripture." />
 
-      {/* Testament Switcher */}
       <div className="bg-slate-100 dark:bg-slate-900 p-1.5 rounded-2xl flex gap-1 relative overflow-hidden mb-2">
         {(['All', 'OT', 'NT'] as const).map((t) => (
           <button
@@ -243,7 +248,6 @@ const BibleView: React.FC = () => {
       </div>
 
       <div className="space-y-8">
-        {/* Old Testament */}
         {(activeTestament === 'All' || activeTestament === 'OT') && otBooks.length > 0 && (
           <div>
             <div className="flex items-center gap-3 mb-4 px-1">
@@ -270,7 +274,6 @@ const BibleView: React.FC = () => {
           </div>
         )}
 
-        {/* New Testament */}
         {(activeTestament === 'All' || activeTestament === 'NT') && ntBooks.length > 0 && (
           <div>
             <div className="flex items-center gap-3 mb-4 px-1">
@@ -294,12 +297,6 @@ const BibleView: React.FC = () => {
                 </button>
               ))}
             </div>
-          </div>
-        )}
-
-        {filteredBooks.length === 0 && (
-          <div className="text-center py-20 text-slate-400">
-            <p className="font-bold">No books found matching your search.</p>
           </div>
         )}
       </div>
