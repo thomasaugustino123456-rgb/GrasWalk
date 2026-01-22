@@ -7,32 +7,31 @@ export const supabaseService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    let { data: profile, error } = await supabase
+    // Use upsert to handle both fetching and creation in fewer steps
+    const newProfile = {
+      id: user.id,
+      name: user.email?.split('@')[0] || 'Member',
+      streak: 1,
+      joined_date: new Date().toISOString(),
+      avatar_seed: user.id,
+    };
+
+    const { data: profile, error } = await supabase
       .from('profiles')
-      .select('*')
-      .eq('id', user.id)
+      .upsert(newProfile, { onConflict: 'id' })
+      .select()
       .single();
 
-    if (error && error.code === 'PGRST116') {
-      const newProfile = {
-        id: user.id,
-        name: user.email?.split('@')[0] || 'Member',
-        streak: 1,
-        joined_date: new Date().toISOString(),
-        avatar_seed: user.id,
-      };
-      const { data, error: insertError } = await supabase
-        .from('profiles')
-        .insert(newProfile)
-        .select()
-        .single();
-      
-      if (insertError) return null;
-      profile = data;
+    if (error) {
+      console.error("Profile sync error:", error);
+      return null;
     }
 
-    const savedVerses = await this.getSavedVerses();
-    const supportedPrayers = await this.getSupportedPrayers();
+    // Parallelize metadata fetching for speed
+    const [savedVerses, supportedPrayers] = await Promise.all([
+      this.getSavedVerses(),
+      this.getSupportedPrayers()
+    ]);
 
     return {
       id: user.id,
@@ -55,11 +54,7 @@ export const supabaseService = {
       .update(updates)
       .eq('id', user.id);
 
-    if (error) {
-      console.error("Update profile error:", error);
-      return false;
-    }
-    return true;
+    return !error;
   },
 
   // PRAYER OPERATIONS
@@ -73,12 +68,10 @@ export const supabaseService = {
         prayer_supports(user_id),
         prayer_comments(id)
       `)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(30); // Pagination for faster mobile loading
     
-    if (error) {
-      console.error("Fetch error:", error);
-      return [];
-    }
+    if (error) return [];
     
     return data.map(p => ({
       id: p.id,
@@ -88,7 +81,6 @@ export const supabaseService = {
       timestamp: new Date(p.created_at),
       prayers_count: p.prayers_count || 0,
       is_anonymous: p.is_anonymous,
-      // Fix: added is_answered to satisfy the Prayer interface
       is_answered: p.is_answered || false,
       has_supported: p.prayer_supports?.some((s: any) => s.user_id === user?.id),
       comment_count: p.prayer_comments?.length || 0
@@ -99,22 +91,19 @@ export const supabaseService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const newPrayer = {
-      user_id: user.id,
-      content,
-      author: isAnon ? 'Anonymous' : author,
-      is_anonymous: isAnon,
-      prayers_count: 0
-    };
-
     const { data, error } = await supabase
       .from('prayers')
-      .insert(newPrayer)
+      .insert({
+        user_id: user.id,
+        content,
+        author: isAnon ? 'Anonymous' : author,
+        is_anonymous: isAnon,
+        prayers_count: 0
+      })
       .select()
       .single();
 
     if (error) return null;
-
     return {
       id: data.id,
       user_id: data.user_id,
@@ -123,19 +112,13 @@ export const supabaseService = {
       timestamp: new Date(data.created_at),
       prayers_count: data.prayers_count,
       is_anonymous: data.is_anonymous,
-      // Fix: added is_answered to satisfy the Prayer interface
-      is_answered: data.is_answered || false,
-      comment_count: 0
+      is_answered: data.is_answered || false
     };
   },
 
   async deletePrayer(id: string): Promise<boolean> {
     const { error } = await supabase.from('prayers').delete().eq('id', id);
-    if (error) {
-      console.error("Supabase Delete Prayer Error:", error);
-      return false;
-    }
-    return true;
+    return !error;
   },
 
   async toggleSupport(prayerId: string): Promise<boolean> {
@@ -169,189 +152,83 @@ export const supabaseService = {
     await supabase.from('prayers').update({ prayers_count: Math.max(0, (data?.prayers_count || 0) - 1) }).eq('id', id);
   },
 
-  // STORY OPERATIONS
   async fetchStories(): Promise<Story[]> {
     const { data, error } = await supabase
       .from('stories')
       .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) return [];
-    return data;
+      .order('created_at', { ascending: false })
+      .limit(10);
+    return error ? [] : data;
   },
 
   async uploadStory(file: File): Promise<Story | null> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error("You must be logged in to upload a story.");
-    }
+    if (!user) throw new Error("Not logged in");
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
+    const fileName = `${user.id}-${Date.now()}.${file.name.split('.').pop()}`;
+    const { error: uploadError } = await supabase.storage.from('stories').upload(fileName, file);
+    if (uploadError) throw uploadError;
 
-    const { error: uploadError } = await supabase.storage
-      .from('stories')
-      .upload(filePath, file, {
-        contentType: file.type,
-        cacheControl: '3600',
-        upsert: false
-      });
+    const { data: { publicUrl } } = supabase.storage.from('stories').getPublicUrl(fileName);
+    const { data: profile } = await supabase.from('profiles').select('name, avatar_seed').eq('id', user.id).single();
 
-    if (uploadError) {
-      console.error("Supabase Storage error details:", uploadError);
-      if (uploadError.message.includes('violates row-level security policy')) {
-        throw new Error("RLS Error: Your Supabase Storage bucket 'stories' needs a Policy allowing 'INSERT' for authenticated users. Check your dashboard.");
-      }
-      throw new Error(`Upload failed: ${uploadError.message}`);
-    }
+    const { data: story, error: dbError } = await supabase.from('stories').insert({
+      user_id: user.id,
+      author: profile?.name || 'Member',
+      media_url: publicUrl,
+      media_type: file.type.startsWith('video') ? 'video' : 'image',
+      avatar_seed: profile?.avatar_seed
+    }).select().single();
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('stories')
-      .getPublicUrl(filePath);
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('name, avatar_seed')
-      .eq('id', user.id)
-      .single();
-
-    const { data: story, error: dbError } = await supabase
-      .from('stories')
-      .insert({
-        user_id: user.id,
-        author: profile?.name || 'Member',
-        media_url: publicUrl,
-        media_type: file.type.startsWith('video') ? 'video' : 'image',
-        avatar_seed: profile?.avatar_seed
-      })
-      .select()
-      .single();
-
-    if (dbError) {
-      console.error("Database story insert error:", dbError);
-      throw new Error("Failed to save story record. Check 'stories' table RLS policies.");
-    }
-
+    if (dbError) throw dbError;
     return story;
   },
 
   async deleteStory(id: string): Promise<boolean> {
     const { error } = await supabase.from('stories').delete().eq('id', id);
-    if (error) {
-      console.error("Supabase Delete Story Error:", error);
-      return false;
-    }
-    return true;
-  },
-
-  // COMMENT OPERATIONS
-  async getComments(prayerId: string): Promise<PrayerComment[]> {
-    const { data, error } = await supabase
-      .from('prayer_comments')
-      .select('*')
-      .eq('prayer_id', prayerId)
-      .order('created_at', { ascending: true });
-    
-    if (error) return [];
-    return data;
-  },
-
-  async addComment(prayerId: string, content: string, author: string): Promise<PrayerComment | null> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const { data, error } = await supabase
-      .from('prayer_comments')
-      .insert({
-        prayer_id: prayerId,
-        user_id: user.id,
-        content,
-        author
-      })
-      .select()
-      .single();
-
-    if (error) return null;
-    return data;
-  },
-
-  // CHAT OPERATIONS
-  async saveChatMessage(message: ChatMessage): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    await supabase.from('chats').insert({
-      user_id: user.id,
-      role: message.role,
-      text: message.text
-    });
+    return !error;
   },
 
   async getChatHistory(): Promise<ChatMessage[]> {
     const { data, error } = await supabase
       .from('chats')
       .select('*')
-      .order('created_at', { ascending: true });
-    
-    if (error) return [];
-    return data.map(c => ({ id: c.id, role: c.role, text: c.text }));
+      .order('created_at', { ascending: true })
+      .limit(50);
+    return error ? [] : data.map(c => ({ id: c.id, role: c.role, text: c.text }));
   },
 
-  // VERSE OPERATIONS
+  async saveChatMessage(message: ChatMessage): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('chats').insert({ user_id: user.id, role: message.role, text: message.text });
+  },
+
   async saveVerse(verse: string, reference: string): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    await supabase.from('saved_verses').upsert({
-      user_id: user.id,
-      verse,
-      reference
-    });
+    await supabase.from('saved_verses').upsert({ user_id: user.id, verse, reference });
   },
 
   async getSavedVerses(): Promise<FavoriteVerse[]> {
-    const { data, error } = await supabase
-      .from('saved_verses')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) return [];
-    return data.map(v => ({
-      id: v.id,
-      verse: v.verse,
-      reference: v.reference,
-      savedAt: new Date(v.created_at)
-    }));
+    const { data, error } = await supabase.from('saved_verses').select('*').order('created_at', { ascending: false });
+    return error ? [] : data.map(v => ({ id: v.id, verse: v.verse, reference: v.reference, savedAt: new Date(v.created_at) }));
   },
 
   async getSupportedPrayers(): Promise<Prayer[]> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
-
-    const { data, error } = await supabase
-      .from('prayer_supports')
-      .select(`
-        prayer_id,
-        prayers(*)
-      `)
-      .eq('user_id', user.id);
-
+    const { data, error } = await supabase.from('prayer_supports').select('prayers(*)').eq('user_id', user.id);
     if (error) return [];
-    return data
-      .filter((d: any) => d.prayers !== null)
-      .map((d: any) => ({
-        ...d.prayers,
-        timestamp: new Date(d.prayers.created_at),
-        has_supported: true,
-        // Ensure is_answered is present in the mapped object
-        is_answered: d.prayers.is_answered || false
-      }));
+    return data.filter((d: any) => d.prayers).map((d: any) => ({
+      ...d.prayers,
+      timestamp: new Date(d.prayers.created_at),
+      has_supported: true,
+      is_answered: d.prayers.is_answered || false
+    }));
   },
 
   async updateStats(type: 'devo' | 'prayer'): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    console.log(`Activity logged: ${type}`);
+    console.debug(`Activity sync: ${type}`);
   }
 };

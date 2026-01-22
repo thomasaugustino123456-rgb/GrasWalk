@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types';
-import { askTheBible } from '../services/geminiService';
+import { askTheBibleStream } from '../services/geminiService';
 import { supabaseService } from '../services/supabaseService';
 
 interface AskBibleProps {
@@ -13,18 +13,24 @@ const AskBible: React.FC<AskBibleProps> = ({ initialPrompt, clearPrompt }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const loadHistory = async () => {
-      const history = await supabaseService.getChatHistory();
-      if (history.length === 0) {
-        setMessages([{ id: '1', role: 'model', text: "Hi! I'm Bible Buddy. I'm here to help you explore God's Word. What's on your mind?" }]);
-      } else {
-        setMessages(history);
+      try {
+        const history = await supabaseService.getChatHistory();
+        if (history.length === 0) {
+          setMessages([{ id: 'welcome', role: 'model', text: "Peace be with you! I'm Bible Buddy. How can I help you explore the Word today?" }]);
+        } else {
+          setMessages(history);
+        }
+      } catch (e) {
+        console.error("Chat history error:", e);
+      } finally {
+        setLoadingHistory(false);
       }
-      setLoadingHistory(false);
     };
     loadHistory();
   }, []);
@@ -37,7 +43,9 @@ const AskBible: React.FC<AskBibleProps> = ({ initialPrompt, clearPrompt }) => {
   }, [initialPrompt]);
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, isTyping]);
 
   const handleSend = async (e: React.FormEvent | null, promptOverride?: string) => {
@@ -45,72 +53,95 @@ const AskBible: React.FC<AskBibleProps> = ({ initialPrompt, clearPrompt }) => {
     const messageText = promptOverride || input;
     if (!messageText.trim() || isTyping) return;
 
+    setError(null);
     const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: messageText };
     setMessages(prev => [...prev, userMsg]);
     if (!promptOverride) setInput('');
     setIsTyping(true);
     
-    await supabaseService.saveChatMessage(userMsg);
+    // Save user message in background
+    supabaseService.saveChatMessage(userMsg);
 
     try {
-      const chatHistory = messages.map(m => ({ role: m.role as string, text: m.text }));
-      const responseText = await askTheBible(messageText, chatHistory);
-      const botMsg: ChatMessage = { 
-        id: (Date.now() + 1).toString(), 
-        role: 'model', 
-        text: responseText 
-      };
-      setMessages(prev => [...prev, botMsg]);
-      await supabaseService.saveChatMessage(botMsg);
-    } catch (error) {
-      console.error("Chat error:", error);
+      let fullResponseText = "";
+      const botMsgId = (Date.now() + 1).toString();
+      
+      // Add empty message for streaming
+      setMessages(prev => [...prev, { id: botMsgId, role: 'model', text: "" }]);
+      
+      const stream = askTheBibleStream(messageText, messages);
+      
+      for await (const chunk of stream) {
+        fullResponseText += chunk;
+        setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullResponseText } : m));
+      }
+      
+      // Finalize and save bot message
+      const finalBotMsg: ChatMessage = { id: botMsgId, role: 'model', text: fullResponseText };
+      supabaseService.saveChatMessage(finalBotMsg);
+    } catch (err: any) {
+      console.error("Bible Buddy failure:", err);
+      setError("I'm currently reflecting. Please try sending your message again.");
     } finally {
       setIsTyping(false);
     }
   };
 
-  if (loadingHistory) return <div className="p-20 text-center text-slate-400">Loading conversation...</div>;
+  if (loadingHistory) return <div className="p-20 text-center text-slate-400 font-bold animate-pulse">Consulting the Word...</div>;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-140px)] max-w-2xl mx-auto animate-in fade-in duration-500">
+    <div className="flex flex-col h-[calc(100vh-160px)] max-w-2xl mx-auto animate-in fade-in duration-500">
       <div className="flex-1 overflow-y-auto no-scrollbar pb-6 space-y-6 px-1 pt-4">
         {messages.map((message) => (
           <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] p-5 rounded-3xl shadow-sm ${message.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none ring-4 ring-slate-100/30'}`}>
+            <div className={`max-w-[85%] p-5 rounded-3xl shadow-sm ${
+              message.role === 'user' 
+              ? 'bg-indigo-600 text-white rounded-tr-none shadow-indigo-100' 
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-100 dark:border-slate-800 rounded-tl-none'
+            }`}>
               {message.role === 'model' && (
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center">
                     <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-500">Bible Buddy</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Bible Buddy</span>
                 </div>
               )}
-              <p className="text-[15px] leading-relaxed whitespace-pre-line font-medium">{message.text}</p>
+              <p className="text-[15px] leading-relaxed whitespace-pre-line font-medium">{message.text || (isTyping && message.id === messages[messages.length-1].id ? "..." : "")}</p>
             </div>
           </div>
         ))}
-        {isTyping && (
+        {isTyping && messages[messages.length-1]?.role !== 'model' && (
           <div className="flex justify-start">
-            <div className="bg-white border border-slate-100 p-5 rounded-3xl rounded-tl-none ring-4 ring-slate-100/30 flex gap-1.5 items-center">
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+            <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl rounded-tl-none flex gap-2 items-center shadow-sm">
+              <span className="text-[10px] font-bold text-slate-400 uppercase animate-pulse">Buddy is typing...</span>
+              <div className="flex gap-1">
+                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce"></div>
+                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                <div className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
+              </div>
             </div>
+          </div>
+        )}
+        {error && (
+          <div className="p-4 bg-rose-50 dark:bg-rose-900/20 text-rose-600 text-xs font-bold rounded-2xl text-center border border-rose-100 dark:border-rose-900/30">
+            {error} <button onClick={() => handleSend(null, messages[messages.length-1].text)} className="underline ml-2">Retry</button>
           </div>
         )}
         <div ref={scrollRef} />
       </div>
 
-      <div className="pt-4 pb-2 sticky bottom-0 bg-slate-50/80 backdrop-blur-md">
-        <form onSubmit={(e) => handleSend(e)} className="relative group">
+      <div className="pt-4 pb-2 sticky bottom-0 bg-slate-50/80 dark:bg-black/80 backdrop-blur-md">
+        <form onSubmit={(e) => handleSend(e)} className="relative">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question about faith..."
-            className="w-full bg-white border border-slate-200 rounded-[2rem] py-5 pl-6 pr-16 focus:outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all shadow-xl shadow-indigo-100/20 text-slate-700 text-lg"
+            disabled={isTyping}
+            placeholder="Ask anything about faith..."
+            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2rem] py-5 pl-6 pr-16 focus:outline-none focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900/20 focus:border-indigo-500 transition-all text-slate-700 dark:text-slate-100 text-lg shadow-lg disabled:opacity-70"
           />
-          <button type="submit" disabled={!input.trim() || isTyping} className="absolute right-2 top-2 bg-indigo-600 text-white p-3.5 rounded-full hover:bg-indigo-700 transition-all disabled:opacity-50 transform hover:scale-105 active:scale-95 shadow-md shadow-indigo-200">
+          <button type="submit" disabled={!input.trim() || isTyping} className="absolute right-2 top-2 bg-indigo-600 text-white p-3.5 rounded-full hover:bg-indigo-700 active:scale-95 transition-all shadow-md disabled:opacity-50">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </form>

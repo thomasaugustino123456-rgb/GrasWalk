@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { Devotional } from "../types";
 
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -11,6 +11,7 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
   const ai = getAI();
   const translation = getTranslation();
   const tone = getTone();
+  const cycle = new Date().getHours() < 12 ? "Morning" : "Evening";
 
   let toneInstruction = "encouraging and gentle language";
   if (tone === 'deep') toneInstruction = "theological, scholarly, and insightful language with historical context";
@@ -18,7 +19,7 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `You are a Christian devotional writer. Generate a short daily devotional. Select a powerful Bible verse from the ${translation} version and write a devotional around it. Requirements: 120–180 words of text, use a ${toneInstruction}, youth-friendly tone, no controversial theology.`,
+    contents: `You are a Christian devotional writer. Generate a ${cycle} devotional for a youth-friendly audience. Select a powerful Bible verse from the ${translation} version. Requirements: 120–180 words of text, use a ${toneInstruction}, focusing on ${cycle === 'Morning' ? 'starting the day with God' : 'reflecting on God\'s goodness at the end of the day'}.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -27,7 +28,7 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
           title: { type: Type.STRING },
           verse: { type: Type.STRING },
           reference: { type: Type.STRING },
-          reflection: { type: Type.STRING, description: "The devotional text (120-180 words)" },
+          reflection: { type: Type.STRING },
           reflectionQuestion: { type: Type.STRING },
           shortPrayer: { type: Type.STRING },
         },
@@ -40,13 +41,69 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
   const data = JSON.parse(responseText);
   
   return {
-    title: data.title || "Daily Devotional",
-    verse: data.verse || "",
-    reference: data.reference || translation,
-    reflection: data.reflection || "",
-    reflectionQuestion: data.reflectionQuestion || "",
-    shortPrayer: data.shortPrayer || "",
-    date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    ...data,
+    date: `${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} • ${cycle} Bread`
+  };
+};
+
+export async function* askTheBibleStream(question: string, history: { role: string; text: string }[]) {
+  const ai = getAI();
+  const translation = getTranslation();
+  const tone = getTone();
+
+  let toneInstruction = "friendly Christian mentor";
+  if (tone === 'deep') toneInstruction = "knowledgeable Bible scholar";
+  if (tone === 'practical') toneInstruction = "bold practical spiritual mentor";
+  
+  const optimizedHistory = history.slice(-8).map(h => ({
+    role: h.role === 'user' ? 'user' : 'model' as 'user' | 'model',
+    parts: [{ text: h.text }]
+  }));
+
+  const chat = ai.chats.create({
+    model: "gemini-3-flash-preview",
+    history: optimizedHistory,
+    config: {
+      systemInstruction: `You are 'Bible Buddy', a ${toneInstruction}. Answer simply and kindly for a youth audience. Use the ${translation} Bible version. Keep answers under 150 words. If the user is struggling, be extra compassionate. End with a 1-sentence reflection question.`,
+    },
+  });
+
+  try {
+    const streamResponse = await chat.sendMessageStream({ message: question });
+    for await (const chunk of streamResponse) {
+      const c = chunk as GenerateContentResponse;
+      yield c.text || "";
+    }
+  } catch (e) {
+    console.error("Gemini Stream Error:", e);
+    yield "I'm having a little trouble connecting right now. Could you try your question again? Peace be with you.";
+  }
+}
+
+export const getSearchGroundedDevotional = async (topic: string): Promise<Devotional> => {
+  const ai = getAI();
+  const translation = getTranslation();
+  const cycle = new Date().getHours() < 12 ? "Morning" : "Evening";
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `Find encouraging news or principles about "${topic}" and create a ${cycle} devotional. Requirements: Bible verse from ${translation}, 100-word reflection, a deep reflection question, and a 2-sentence prayer. Format the output clearly.`,
+    config: {
+      tools: [{ googleSearch: {} }],
+    }
+  });
+
+  const text = response.text || "";
+  
+  return {
+    title: topic,
+    verse: text.match(/"([^"]+)"/)?.[1] || "Trust in the Lord with all your heart.",
+    reference: text.match(/([A-Z][a-z]+ \d+:\d+)/)?.[0] || translation,
+    reflection: text.length > 500 ? text.substring(0, 500) + "..." : text,
+    reflectionQuestion: "How does this truth change your view of today?",
+    shortPrayer: "Lord, thank You for Your presence in this area of my life. Guide my steps. Amen.",
+    date: `${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} • ${topic}`,
+    sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => c.web).filter(Boolean) || []
   };
 };
 
@@ -54,7 +111,7 @@ export const streamDevotionalAudio = async (text: string): Promise<string> => {
   const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",
-    contents: [{ parts: [{ text: `Read this Christian devotional in a warm, calm, and peaceful voice: ${text}` }] }],
+    contents: [{ parts: [{ text: `In a calm, warm voice, read: ${text}` }] }],
     config: {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
@@ -64,68 +121,5 @@ export const streamDevotionalAudio = async (text: string): Promise<string> => {
       },
     },
   });
-
-  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  return base64Audio || "";
-};
-
-export const askTheBible = async (question: string, history: { role: string; text: string }[]): Promise<string> => {
-  const ai = getAI();
-  const translation = getTranslation();
-  const tone = getTone();
-
-  let toneInstruction = "friendly Christian mentor and Bible teacher";
-  if (tone === 'deep') toneInstruction = "knowledgeable Bible scholar and historian";
-  if (tone === 'practical') toneInstruction = "bold practical life coach and spiritual mentor";
-  
-  const chat = ai.chats.create({
-    model: "gemini-3-pro-preview",
-    history: history.map(h => ({
-      role: h.role === 'user' ? 'user' : 'model' as 'user' | 'model',
-      parts: [{ text: h.text }]
-    })),
-    config: {
-      systemInstruction: `You are 'Bible Buddy', a ${toneInstruction}. Your goal is to answer questions clearly and kindly. Rules: 1. Use youth-friendly language. 2. Avoid any judgment. 3. Always reference Bible verses using the ${translation} version. 4. Encourage faith. 5. Keep the total answer under 250 words. 6. End with one gentle follow-up reflection question.`,
-    },
-  });
-
-  const response = await chat.sendMessage({ message: question });
-  return response.text || "I'm sorry, I couldn't generate a response right now. Please try rephrasing your question.";
-};
-
-export const rewritePrayer = async (text: string): Promise<string> => {
-  const ai = getAI();
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `You are a compassionate prayer helper. Rewrite this prayer request in a gentle, respectful, and encouraging way without changing its meaning: "${text}". Rules: Keep it under 80 words. Warm and supportive tone.`,
-  });
-  return response.text || text;
-};
-
-export const getSearchGroundedDevotional = async (topic: string): Promise<Devotional> => {
-  const ai = getAI();
-  const translation = getTranslation();
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Find recent encouraging news and connect them to a biblical principle using the ${translation} version. Create a devotional titled: ${topic}.`,
-    config: {
-      tools: [{ googleSearch: {} }],
-    }
-  });
-
-  const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks
-    ?.map((chunk: any) => chunk.web)
-    .filter((web: any) => web && web.uri)
-    .map((web: any) => ({ uri: web.uri, title: web.title || 'Source' }));
-
-  return {
-    title: topic,
-    verse: "Psalm 118:24",
-    reference: translation,
-    reflection: response.text || "No reflection generated.",
-    reflectionQuestion: "How can you be a light today?",
-    shortPrayer: "Lord, help us to see your goodness in the world.",
-    date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-    sources: sources || []
-  };
+  return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || "";
 };
