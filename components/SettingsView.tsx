@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, SectionTitle, Badge } from './Shared';
 import { BibleTranslation, AITone } from '../types';
@@ -40,6 +41,21 @@ const SettingsView: React.FC = () => {
         title="Settings" 
         subtitle="Manage your spiritual space."
       />
+
+      {/* PWA / Install Section - Helpful for students without Play Store access */}
+      <div className="space-y-2">
+        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">APP EXPERIENCE</h4>
+        <Card className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white border-none p-6 shadow-xl relative overflow-hidden">
+          <div className="relative z-10 space-y-3">
+            <Badge color="yellow">Tip</Badge>
+            <h3 className="text-xl font-bold leading-tight">Add to Home Screen</h3>
+            <p className="text-indigo-100 text-sm font-medium leading-relaxed">
+              Enjoy GraceWalk like a real app! Tap your browser's <span className="font-bold underline">Share</span> button and select <span className="font-bold underline">"Add to Home Screen"</span>.
+            </p>
+          </div>
+          <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+        </Card>
+      </div>
 
       {/* General Settings Group */}
       <div className="space-y-2">
