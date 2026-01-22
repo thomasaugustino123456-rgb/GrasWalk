@@ -1,9 +1,8 @@
-// This file augments the global NodeJS namespace to provide type definitions for environment variables.
-// Using namespace augmentation instead of a direct 'process' variable declaration prevents
-// "Cannot redeclare block-scoped variable 'process'" errors when Node.js types are already present.
+// Augment the NodeJS namespace to include API_KEY in ProcessEnv.
+// This avoids redeclaring the 'process' variable which may conflict with existing global declarations (e.g. from @types/node).
 declare namespace NodeJS {
   interface ProcessEnv {
-    API_KEY?: string;
+    API_KEY: string;
     [key: string]: string | undefined;
   }
 }

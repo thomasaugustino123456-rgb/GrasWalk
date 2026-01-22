@@ -1,10 +1,9 @@
-
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Devotional } from "../types";
 
-// Always use process.env.API_KEY directly for initialization as per guidelines
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// Always use process.env.API_KEY directly for initialization as per guidelines.
+// The type is now correctly handled via global.d.ts augmentation.
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const getTranslation = () => localStorage.getItem('bible_translation') || 'NIV';
 const getTone = () => localStorage.getItem('ai_tone') || 'gentle';
