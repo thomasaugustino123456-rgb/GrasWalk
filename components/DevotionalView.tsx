@@ -137,13 +137,19 @@ const DevotionalView: React.FC = () => {
         const source = audioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContextRef.current.destination);
-        source.onended = () => setIsPlaying(false);
+        
+        source.onended = () => {
+          setIsPlaying(false);
+          audioSourceRef.current = null;
+        };
+        
         source.start();
         audioSourceRef.current = source;
         setIsPlaying(true);
       }
     } catch (error) {
       console.error("Audio playback error:", error);
+      setIsPlaying(false);
     } finally {
       setIsAudioLoading(false);
     }
@@ -259,12 +265,25 @@ ${devotional.shortPrayer}
                   <button 
                     onClick={handleListen}
                     disabled={isAudioLoading}
-                    className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md hover:bg-white/30 transition-all active:scale-90"
+                    className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-90 ${
+                      isAudioLoading 
+                        ? 'bg-indigo-400/30' 
+                        : isPlaying 
+                          ? 'bg-white/40 shadow-[0_0_20px_rgba(255,255,255,0.4)]' 
+                          : 'bg-white/20 hover:bg-white/30'
+                    }`}
                   >
                     {isAudioLoading ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <div className="flex gap-0.5 items-end justify-center h-4">
+                        <div className="w-1 bg-white rounded-full animate-[audio-wave_0.8s_ease-in-out_infinite] h-2"></div>
+                        <div className="w-1 bg-white rounded-full animate-[audio-wave_0.8s_ease-in-out_0.2s_infinite] h-3"></div>
+                        <div className="w-1 bg-white rounded-full animate-[audio-wave_0.8s_ease-in-out_0.4s_infinite] h-1.5"></div>
+                      </div>
                     ) : isPlaying ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                      <div className="relative flex items-center justify-center">
+                        <div className="absolute inset-0 bg-white/30 rounded-full animate-ping"></div>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="relative z-10"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                      </div>
                     ) : (
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     )}
@@ -323,6 +342,13 @@ ${devotional.shortPrayer}
           </Card>
         </div>
       )}
+
+      <style>{`
+        @keyframes audio-wave {
+          0%, 100% { height: 4px; }
+          50% { height: 16px; }
+        }
+      `}</style>
     </div>
   );
 };

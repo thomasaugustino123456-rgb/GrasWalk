@@ -4,13 +4,25 @@ import { Card, SectionTitle, Badge } from './Shared';
 import { BibleTranslation, AITone } from '../types';
 import { supabase } from '../services/supabaseClient';
 
+const DEFAULT_TEMPLATES = {
+  whatsapp: `Hey! I've been working on a student project called GraceWalk. It's an AI Bible companion I built for our generation. Check it out here: ${window.location.origin}`,
+  discord: `**GraceWalk - Student AI Project** 🕊️\nI built a clean, AI-powered Bible buddy for my daily walk. No ads, just the Word. \nCheck it out: ${window.location.origin}`,
+  reddit_comment: `I actually felt the same way, so I spent my time in school building a free tool called GraceWalk. It uses AI to explain verses simply. Hope it helps you! ${window.location.origin}`
+};
+
 const SettingsView: React.FC = () => {
   const [darkMode, setDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [translation, setTranslation] = useState<BibleTranslation>(() => (localStorage.getItem('bible_translation') as BibleTranslation) || 'NIV');
   const [tone, setTone] = useState<AITone>(() => (localStorage.getItem('ai_tone') as AITone) || 'gentle');
   const [reminderTime, setReminderTime] = useState(localStorage.getItem('reminder_time') || '08:00');
   const [remindersEnabled, setRemindersEnabled] = useState(localStorage.getItem('reminders_enabled') === 'true');
-  const [showShareModal, setShowShareModal] = useState(false);
+  const [isEditingTemplates, setIsEditingTemplates] = useState(false);
+
+  // Custom Templates state
+  const [customTemplates, setCustomTemplates] = useState(() => {
+    const saved = localStorage.getItem('custom_share_templates');
+    return saved ? JSON.parse(saved) : DEFAULT_TEMPLATES;
+  });
 
   const toggleTheme = () => {
     const newMode = !darkMode;
@@ -29,10 +41,11 @@ const SettingsView: React.FC = () => {
     alert(`Copied ${platform} template! Use this to share naturally.`);
   };
 
-  const templates = {
-    whatsapp: `Hey! I've been working on a student project called GraceWalk. It's an AI Bible companion I built for our generation. Check it out here: ${window.location.origin}`,
-    discord: `**GraceWalk - Student AI Project** 🕊️\nI built a clean, AI-powered Bible buddy for my daily walk. No ads, just the Word. \nCheck it out: ${window.location.origin}`,
-    reddit_comment: `I actually felt the same way, so I spent my time in school building a free tool called GraceWalk. It uses AI to explain verses simply. Hope it helps you! ${window.location.origin}`
+  const handleTemplateChange = (platform: keyof typeof DEFAULT_TEMPLATES, value: string) => {
+    setCustomTemplates((prev: any) => ({
+      ...prev,
+      [platform]: value
+    }));
   };
 
   useEffect(() => {
@@ -48,6 +61,10 @@ const SettingsView: React.FC = () => {
     localStorage.setItem('reminders_enabled', String(remindersEnabled));
   }, [reminderTime, remindersEnabled]);
 
+  useEffect(() => {
+    localStorage.setItem('custom_share_templates', JSON.stringify(customTemplates));
+  }, [customTemplates]);
+
   return (
     <div className="space-y-8 pb-32 animate-in fade-in duration-500">
       <SectionTitle 
@@ -57,7 +74,16 @@ const SettingsView: React.FC = () => {
 
       {/* Share Hub - The "Safety" Section */}
       <div className="space-y-2">
-        <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-4">SHARE THE LIGHT</h4>
+        <div className="flex justify-between items-center px-4">
+          <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">SHARE THE LIGHT</h4>
+          <button 
+            onClick={() => setIsEditingTemplates(!isEditingTemplates)}
+            className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+          >
+            {isEditingTemplates ? 'Done Editing' : 'Edit Templates'}
+          </button>
+        </div>
+        
         <Card className="bg-indigo-600 p-6 shadow-xl relative overflow-hidden group">
           <div className="relative z-10 space-y-4">
             <div className="flex justify-between items-start">
@@ -65,25 +91,74 @@ const SettingsView: React.FC = () => {
                <span className="text-[10px] text-white/50 font-bold uppercase tracking-widest">Student Builder v1.2</span>
             </div>
             <h3 className="text-xl font-bold text-white leading-tight">Help GraceWalk Grow</h3>
-            <p className="text-indigo-100 text-sm font-medium leading-relaxed">
-              Sharing your work is how the light spreads. Use these templates to invite others to the journey without sounding like an ad.
-            </p>
-            <div className="grid grid-cols-1 gap-2 pt-2">
-               <button 
-                 onClick={() => copyToClipboard(templates.whatsapp, 'WhatsApp')}
-                 className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
-               >
-                 <span className="font-bold text-white text-sm">WhatsApp Friend</span>
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/></svg>
-               </button>
-               <button 
-                 onClick={() => copyToClipboard(templates.reddit_comment, 'Reddit')}
-                 className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
-               >
-                 <span className="font-bold text-white text-sm">Helpful Reddit Comment</span>
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-               </button>
-            </div>
+            
+            {isEditingTemplates ? (
+              <div className="space-y-4 pt-2 animate-in slide-in-from-top-2 duration-300">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-white/60 uppercase tracking-widest ml-1">WhatsApp Message</label>
+                  <textarea 
+                    value={customTemplates.whatsapp}
+                    onChange={(e) => handleTemplateChange('whatsapp', e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:outline-none min-h-[80px]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-white/60 uppercase tracking-widest ml-1">Discord Message</label>
+                  <textarea 
+                    value={customTemplates.discord}
+                    onChange={(e) => handleTemplateChange('discord', e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:outline-none min-h-[80px]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-white/60 uppercase tracking-widest ml-1">Reddit Comment</label>
+                  <textarea 
+                    value={customTemplates.reddit_comment}
+                    onChange={(e) => handleTemplateChange('reddit_comment', e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm text-white placeholder-white/40 focus:ring-2 focus:ring-white/30 focus:outline-none min-h-[80px]"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    setCustomTemplates(DEFAULT_TEMPLATES);
+                    alert("Templates reset to defaults.");
+                  }}
+                  className="w-full py-2 text-[10px] font-bold text-white/40 uppercase tracking-[0.2em] hover:text-white/80 transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-indigo-100 text-sm font-medium leading-relaxed">
+                  Sharing your work is how the light spreads. Use these templates to invite others to the journey without sounding like an ad.
+                </p>
+                <div className="grid grid-cols-1 gap-2 pt-2">
+                   <button 
+                     onClick={() => copyToClipboard(customTemplates.whatsapp, 'WhatsApp')}
+                     className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
+                   >
+                     <span className="font-bold text-white text-sm">WhatsApp Friend</span>
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/></svg>
+                   </button>
+                   <button 
+                     onClick={() => copyToClipboard(customTemplates.discord, 'Discord')}
+                     className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
+                   >
+                     <span className="font-bold text-white text-sm">Discord Community</span>
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/></svg>
+                   </button>
+                   <button 
+                     onClick={() => copyToClipboard(customTemplates.reddit_comment, 'Reddit')}
+                     className="w-full flex items-center justify-between p-4 bg-white/10 hover:bg-white/20 rounded-2xl border border-white/10 transition-all active:scale-95"
+                   >
+                     <span className="font-bold text-white text-sm">Helpful Reddit Comment</span>
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-white/60"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                   </button>
+                </div>
+              </>
+            )}
+            
             <div className="pt-2">
                <div className="p-3 bg-black/20 rounded-xl border border-white/5">
                   <p className="text-[10px] text-indigo-200 font-bold italic">

@@ -2,7 +2,13 @@
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { Devotional } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please check your environment variables.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 const getTranslation = () => localStorage.getItem('bible_translation') || 'NIV';
 const getTone = () => localStorage.getItem('ai_tone') || 'gentle';
@@ -18,7 +24,6 @@ export const generateTopicDevotional = async (topic: string): Promise<Devotional
   const now = new Date();
   const cycle = now.getHours() < 12 ? "Morning" : "Evening";
   
-  // Context to force freshness and variety
   const dateStr = now.toDateString();
 
   let toneInstruction = "encouraging and gentle language";
@@ -33,14 +38,14 @@ export const generateTopicDevotional = async (topic: string): Promise<Devotional
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `You are a world-class Christian devotional writer for youth. ${focusPrompt} 
+    contents: [{ parts: [{ text: `You are a world-class Christian devotional writer for youth. ${focusPrompt} 
     
     Instructions:
     1. Bible Version: ${translation}.
     2. Style: ${toneInstruction}.
     3. Reflection: 120-180 words.
     4. MUST include a specific 2-sentence prayer at the end that is UNIQUE to this topic and this time of day.
-    5. Avoid repeating common verses like John 3:16 unless critical.`,
+    5. Avoid repeating common verses like John 3:16 unless critical.` }] }],
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -76,7 +81,19 @@ export async function* askTheBibleStream(question: string, history: { role: stri
   if (tone === 'deep') toneInstruction = "knowledgeable Bible scholar";
   if (tone === 'practical') toneInstruction = "bold practical spiritual mentor";
   
-  const optimizedHistory = history.slice(-6).map(h => ({
+  // Filtering history to ensure it starts with a 'user' message and alternates roles correctly.
+  // The Gemini API requires chat history to begin with a user turn.
+  let validHistory = history.filter(h => h.text && h.text.trim().length > 0);
+  
+  // Find the first index that is a user message
+  const firstUserIndex = validHistory.findIndex(h => h.role === 'user');
+  if (firstUserIndex !== -1) {
+    validHistory = validHistory.slice(firstUserIndex);
+  } else {
+    validHistory = []; // If no user message found, start fresh
+  }
+
+  const optimizedHistory = validHistory.slice(-8).map(h => ({
     role: h.role === 'user' ? 'user' : 'model' as 'user' | 'model',
     parts: [{ text: h.text }]
   }));
@@ -95,8 +112,12 @@ export async function* askTheBibleStream(question: string, history: { role: stri
       const c = chunk as GenerateContentResponse;
       yield c.text || "";
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error("Gemini Stream Error:", e);
+    // Specifically catch and log abort signals for debugging
+    if (e.name === 'AbortError') {
+      console.warn("Gemini request was aborted.");
+    }
     yield "I'm having a little trouble connecting right now. Could you try your question again? Peace be with you.";
   }
 }
