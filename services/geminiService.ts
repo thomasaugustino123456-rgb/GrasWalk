@@ -130,7 +130,7 @@ export const generateDailyDevotional = async (): Promise<Devotional> => {
   return generateTopicDevotional("Daily Bread");
 };
 
-export const streamDevotionalAudio = async (text: string): Promise<string> => {
+export const streamDevotionalAudio = async (text: string, voiceName: string = 'Kore'): Promise<string> => {
   const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",
@@ -139,7 +139,7 @@ export const streamDevotionalAudio = async (text: string): Promise<string> => {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Kore' },
+          prebuiltVoiceConfig: { voiceName },
         },
       },
     },

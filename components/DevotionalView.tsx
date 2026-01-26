@@ -13,6 +13,15 @@ const TOPICS = [
   { id: 'joy', label: 'Joy', icon: '✨' },
 ];
 
+const VOICES = [
+  { id: 'Kore', label: 'Warm', desc: 'Default comfort' },
+  { id: 'Puck', label: 'Youthful', desc: 'Energetic' },
+  { id: 'Charon', label: 'Deep', desc: 'Scholarly' },
+  { id: 'Zephyr', label: 'Calm', desc: 'Peaceful' },
+];
+
+const SPEEDS = [0.8, 1.0, 1.25, 1.5];
+
 function decodeBase64(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -50,9 +59,25 @@ const DevotionalView: React.FC = () => {
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
+  
+  // Audio Preferences
+  const [voice, setVoice] = useState(() => localStorage.getItem('audio_voice') || 'Kore');
+  const [speed, setSpeed] = useState(() => parseFloat(localStorage.getItem('audio_speed') || '1.0'));
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('audio_voice', voice);
+  }, [voice]);
+
+  useEffect(() => {
+    localStorage.setItem('audio_speed', speed.toString());
+    if (audioSourceRef.current) {
+      audioSourceRef.current.playbackRate.value = speed;
+    }
+  }, [speed]);
 
   const getCycleKey = () => {
     const now = new Date();
@@ -127,7 +152,10 @@ const DevotionalView: React.FC = () => {
 
     setIsAudioLoading(true);
     try {
-      const audioData = await streamDevotionalAudio(`${devotional.title}. ${devotional.verse}. ${devotional.reflection}. Amen.`);
+      const audioData = await streamDevotionalAudio(
+        `${devotional.title}. ${devotional.verse}. ${devotional.reflection}. Amen.`,
+        voice
+      );
       if (audioData) {
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -136,6 +164,7 @@ const DevotionalView: React.FC = () => {
         const audioBuffer = await decodeAudioData(decodedBytes, audioContextRef.current, 24000, 1);
         const source = audioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
+        source.playbackRate.value = speed;
         source.connect(audioContextRef.current.destination);
         
         source.onended = () => {
@@ -241,7 +270,7 @@ ${devotional.shortPrayer}
                 <div className="flex items-center gap-2">
                   <div className="relative">
                     <button 
-                      onClick={() => setShowShareMenu(!showShareMenu)}
+                      onClick={() => { setShowShareMenu(!showShareMenu); setShowAudioSettings(false); }}
                       className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-md hover:bg-white/20 transition-all active:scale-90"
                       title="Share Devotional"
                     >
@@ -257,6 +286,65 @@ ${devotional.shortPrayer}
                         <button onClick={handleRedditShare} className="w-full px-4 py-3 text-left text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 flex items-center gap-2 border-t border-slate-50 dark:border-slate-800">
                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M17 12h-5v5"/><path d="M7 12h5V7"/></svg>
                           Copy for Reddit
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <button 
+                      onClick={() => { setShowAudioSettings(!showAudioSettings); setShowShareMenu(false); }}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-90 ${showAudioSettings ? 'bg-white/40' : 'bg-white/10 hover:bg-white/20'}`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+
+                    {showAudioSettings && (
+                      <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl border border-slate-100 dark:border-slate-800 z-50 p-6 animate-in zoom-in-95 duration-200 origin-top-right space-y-6">
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Voice Selection</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {VOICES.map(v => (
+                              <button
+                                key={v.id}
+                                onClick={() => { setVoice(v.id); stopAudio(); }}
+                                className={`p-3 rounded-2xl text-left transition-all active:scale-95 border-2 ${
+                                  voice === v.id 
+                                    ? 'bg-indigo-50 border-indigo-600 dark:bg-indigo-900/20' 
+                                    : 'bg-slate-50 border-transparent dark:bg-slate-800'
+                                }`}
+                              >
+                                <p className={`text-xs font-bold ${voice === v.id ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-700 dark:text-slate-300'}`}>{v.label}</p>
+                                <p className="text-[9px] text-slate-400 dark:text-slate-500 leading-none mt-1">{v.desc}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Playback Speed</label>
+                          <div className="bg-slate-50 dark:bg-slate-800 p-1 rounded-xl flex gap-1">
+                            {SPEEDS.map(s => (
+                              <button
+                                key={s}
+                                onClick={() => setSpeed(s)}
+                                className={`flex-1 py-2 rounded-lg text-[10px] font-black transition-all ${
+                                  speed === s 
+                                    ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' 
+                                    : 'text-slate-500'
+                                }`}
+                              >
+                                {s}x
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={() => setShowAudioSettings(false)}
+                          className="w-full py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                        >
+                          Close Settings
                         </button>
                       </div>
                     )}
